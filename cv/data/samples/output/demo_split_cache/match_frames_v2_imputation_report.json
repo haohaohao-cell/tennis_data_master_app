@@ -1,0 +1,1660 @@
+{
+    "windows": [
+        2,
+        4,
+        6,
+        10,
+        15
+    ],
+    "min_points": 4,
+    "defaults": {
+        "player_feet": {
+            "1": [
+                5.48,
+                25.27
+            ],
+            "2": [
+                5.41,
+                -0.34
+            ]
+        },
+        "ball": {
+            "top": [
+                5.72,
+                1.59
+            ],
+            "bottom": [
+                6.73,
+                20.62
+            ]
+        },
+        "bounce": {
+            "top": [
+                5.97,
+                3.15
+            ],
+            "bottom": [
+                6.58,
+                20.64
+            ]
+        }
+    },
+    "before": {
+        "ball_court_missing": 1361,
+        "player_feet_court_missing": 3847,
+        "bounce_court_missing": 68
+    },
+    "after": {},
+    "local_fill_counts": {
+        "ball_court": 1351,
+        "player_feet_court": 3839,
+        "bounce_court": 68
+    },
+    "default_fill_counts": {
+        "player_feet_court": 8,
+        "ball_court": 10
+    },
+    "sample_fill_details": [
+        {
+            "frame_index": 634,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 634,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 634,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 7
+        },
+        {
+            "frame_index": 635,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 5
+        },
+        {
+            "frame_index": 635,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 6
+        },
+        {
+            "frame_index": 635,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 7
+        },
+        {
+            "frame_index": 636,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 636,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 636,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 637,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 637,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 637,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 638,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 638,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 638,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 639,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 639,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 639,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 640,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 640,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 640,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 641,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 641,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 641,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 642,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 642,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 642,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 643,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 643,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 643,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 644,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 644,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 644,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 645,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 645,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 645,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 646,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 646,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 646,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 647,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 647,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 648,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 648,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 649,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 649,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 650,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 650,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 651,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 651,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 652,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 652,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 653,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 654,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 655,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 656,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 657,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 658,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 659,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 660,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 661,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 662,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 663,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 6,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 664,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 6,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 665,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 10,
+            "candidate_points": 10,
+            "inliers": 10
+        },
+        {
+            "frame_index": 666,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 10,
+            "candidate_points": 10,
+            "inliers": 10
+        },
+        {
+            "frame_index": 667,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 10,
+            "candidate_points": 10,
+            "inliers": 10
+        },
+        {
+            "frame_index": 668,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 10,
+            "candidate_points": 10,
+            "inliers": 10
+        },
+        {
+            "frame_index": 669,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 15,
+            "candidate_points": 15,
+            "inliers": 15
+        },
+        {
+            "frame_index": 670,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 671,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 672,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 673,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 674,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 675,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 676,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 676,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 677,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 677,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 678,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 678,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 4
+        },
+        {
+            "frame_index": 679,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 679,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 680,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 680,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 681,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 681,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 682,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 682,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 682,
+            "field": "events.bounce_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 683,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 683,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 684,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 684,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 685,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 685,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 686,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 686,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 687,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 687,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 688,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 688,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 689,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 689,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 690,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 690,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 691,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 691,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 692,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 692,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 693,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 693,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 694,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 694,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 695,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 695,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 696,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 696,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 697,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 697,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 698,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 698,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 699,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 699,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 700,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 700,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 701,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 701,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 702,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 702,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 703,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 703,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 704,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 704,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 705,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 705,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 706,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 706,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 707,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 707,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 708,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 708,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 708,
+            "field": "events.bounce_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 709,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 709,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 710,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 710,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 711,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 711,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 712,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 712,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 713,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 713,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 714,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 714,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 715,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 715,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 716,
+            "field": "ball.court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 716,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 717,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 2,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 718,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 719,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 720,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 721,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 722,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 723,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 724,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 725,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 726,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 6,
+            "candidate_points": 7,
+            "inliers": 6
+        },
+        {
+            "frame_index": 727,
+            "field": "players[1].feet_court",
+            "method": "local_affine",
+            "window": 4,
+            "candidate_points": 4,
+            "inliers": 4
+        },
+        {
+            "frame_index": 728,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 5,
+            "inliers": 4
+        },
+        {
+            "frame_index": 729,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 7,
+            "inliers": 6
+        },
+        {
+            "frame_index": 730,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 4,
+            "candidate_points": 10,
+            "inliers": 8
+        },
+        {
+            "frame_index": 731,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 5,
+            "inliers": 5
+        },
+        {
+            "frame_index": 1096,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1096,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1096,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 9,
+            "inliers": 9
+        },
+        {
+            "frame_index": 1097,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1097,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1097,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1098,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1098,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1098,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1099,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1099,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1099,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1100,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1100,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1100,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1101,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1101,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1101,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1102,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1102,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1102,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1103,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1103,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1103,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        },
+        {
+            "frame_index": 1104,
+            "field": "ball.court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 6,
+            "inliers": 6
+        },
+        {
+            "frame_index": 1104,
+            "field": "players[2].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 7,
+            "inliers": 7
+        },
+        {
+            "frame_index": 1104,
+            "field": "players[1].feet_court",
+            "method": "local_homography",
+            "window": 2,
+            "candidate_points": 8,
+            "inliers": 8
+        }
+    ],
+    "total_fill_events": 5276
+}

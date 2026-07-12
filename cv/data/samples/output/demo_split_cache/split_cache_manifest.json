@@ -1,0 +1,14 @@
+{
+  "source_video": "C:\\Users\\li\\Documents\\projects\\tennis_data_master\\cv\\scripts\\VideoOutput\\demo.mp4",
+  "cache_dir": "C:\\Users\\li\\Documents\\projects\\tennis_data_master\\cv\\scripts\\VideoOutput\\demo_split_cache",
+  "required_files": [
+    "shots_v2.json",
+    "points_v2.json",
+    "match_tactics_v2.json",
+    "match_frames_v2.json",
+    "match_frames_v2_imputed.json",
+    "match_frames_v2_imputation_report.json",
+    "points_heuristic_v2_index_v2.json",
+    "shots_v2_intermediate.json"
+  ]
+}

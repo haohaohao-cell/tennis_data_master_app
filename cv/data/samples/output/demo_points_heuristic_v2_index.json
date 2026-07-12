@@ -1,0 +1,346 @@
+{
+  "source_video": "demo.mp4",
+  "frames_path": "C:\\Users\\li\\Documents\\projects\\tennis_data_master\\cv\\scripts\\VideoOutput\\demo_split_cache\\match_frames_v2.json",
+  "fps": 25.0,
+  "config": {
+    "ball_break_sec": 1.2,
+    "ball_break_sec_with_players": 2.2,
+    "players_break_sec": 0.8,
+    "court_break_sec": 0.32,
+    "min_segment_sec": 2.0,
+    "start_ball_ratio": 0.28,
+    "start_players_ratio": 0.5,
+    "start_court_ratio": 0.5,
+    "min_ball_frames": 6,
+    "min_player_frames": 8,
+    "min_court_frames": 8,
+    "no_ball_support_ratio_for_extension": 0.7,
+    "min_both_players_ratio": 0.45,
+    "min_both_players_total_sec": 2.0,
+    "court_visible_min_keypoints": 9,
+    "court_gap_consecutive_frames": 10
+  },
+  "segment_count": 16,
+  "segments": [
+    {
+      "segment_id": 1,
+      "start_frame": 0,
+      "end_frame": 632,
+      "duration_frames": 633,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 0.0,
+      "end_time_sec": 25.32,
+      "duration_sec": 25.32,
+      "tracknet_frames": 594,
+      "tracknet_ratio": 0.938,
+      "both_players_frames": 632,
+      "both_players_ratio": 0.998,
+      "court_signal_frames": 633,
+      "court_signal_ratio": 1.0,
+      "hit_count": 13,
+      "bounce_count": 19
+    },
+    {
+      "segment_id": 2,
+      "start_frame": 676,
+      "end_frame": 1094,
+      "duration_frames": 419,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 27.04,
+      "end_time_sec": 43.8,
+      "duration_sec": 16.76,
+      "tracknet_frames": 367,
+      "tracknet_ratio": 0.876,
+      "both_players_frames": 362,
+      "both_players_ratio": 0.864,
+      "court_signal_frames": 363,
+      "court_signal_ratio": 0.866,
+      "hit_count": 9,
+      "bounce_count": 9
+    },
+    {
+      "segment_id": 3,
+      "start_frame": 1159,
+      "end_frame": 1314,
+      "duration_frames": 156,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 46.36,
+      "end_time_sec": 52.6,
+      "duration_sec": 6.24,
+      "tracknet_frames": 140,
+      "tracknet_ratio": 0.897,
+      "both_players_frames": 141,
+      "both_players_ratio": 0.904,
+      "court_signal_frames": 142,
+      "court_signal_ratio": 0.91,
+      "hit_count": 2,
+      "bounce_count": 5
+    },
+    {
+      "segment_id": 4,
+      "start_frame": 1420,
+      "end_frame": 2179,
+      "duration_frames": 760,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 56.8,
+      "end_time_sec": 87.2,
+      "duration_sec": 30.4,
+      "tracknet_frames": 620,
+      "tracknet_ratio": 0.816,
+      "both_players_frames": 503,
+      "both_players_ratio": 0.662,
+      "court_signal_frames": 243,
+      "court_signal_ratio": 0.32,
+      "hit_count": 12,
+      "bounce_count": 28
+    },
+    {
+      "segment_id": 5,
+      "start_frame": 2190,
+      "end_frame": 2372,
+      "duration_frames": 183,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 87.6,
+      "end_time_sec": 94.92,
+      "duration_sec": 7.32,
+      "tracknet_frames": 179,
+      "tracknet_ratio": 0.978,
+      "both_players_frames": 133,
+      "both_players_ratio": 0.727,
+      "court_signal_frames": 124,
+      "court_signal_ratio": 0.678,
+      "hit_count": 1,
+      "bounce_count": 9
+    },
+    {
+      "segment_id": 6,
+      "start_frame": 2451,
+      "end_frame": 2662,
+      "duration_frames": 212,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 98.04,
+      "end_time_sec": 106.52,
+      "duration_sec": 8.48,
+      "tracknet_frames": 195,
+      "tracknet_ratio": 0.92,
+      "both_players_frames": 210,
+      "both_players_ratio": 0.991,
+      "court_signal_frames": 211,
+      "court_signal_ratio": 0.995,
+      "hit_count": 6,
+      "bounce_count": 2
+    },
+    {
+      "segment_id": 7,
+      "start_frame": 2734,
+      "end_frame": 3311,
+      "duration_frames": 578,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 109.36,
+      "end_time_sec": 132.48,
+      "duration_sec": 23.12,
+      "tracknet_frames": 505,
+      "tracknet_ratio": 0.874,
+      "both_players_frames": 578,
+      "both_players_ratio": 1.0,
+      "court_signal_frames": 534,
+      "court_signal_ratio": 0.924,
+      "hit_count": 14,
+      "bounce_count": 17
+    },
+    {
+      "segment_id": 8,
+      "start_frame": 3376,
+      "end_frame": 3578,
+      "duration_frames": 203,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 135.04,
+      "end_time_sec": 143.16,
+      "duration_sec": 8.12,
+      "tracknet_frames": 161,
+      "tracknet_ratio": 0.793,
+      "both_players_frames": 202,
+      "both_players_ratio": 0.995,
+      "court_signal_frames": 203,
+      "court_signal_ratio": 1.0,
+      "hit_count": 5,
+      "bounce_count": 4
+    },
+    {
+      "segment_id": 9,
+      "start_frame": 3865,
+      "end_frame": 4130,
+      "duration_frames": 266,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 154.6,
+      "end_time_sec": 165.24,
+      "duration_sec": 10.64,
+      "tracknet_frames": 251,
+      "tracknet_ratio": 0.944,
+      "both_players_frames": 234,
+      "both_players_ratio": 0.88,
+      "court_signal_frames": 139,
+      "court_signal_ratio": 0.523,
+      "hit_count": 3,
+      "bounce_count": 15
+    },
+    {
+      "segment_id": 10,
+      "start_frame": 4141,
+      "end_frame": 4508,
+      "duration_frames": 368,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 165.64,
+      "end_time_sec": 180.36,
+      "duration_sec": 14.72,
+      "tracknet_frames": 243,
+      "tracknet_ratio": 0.66,
+      "both_players_frames": 352,
+      "both_players_ratio": 0.957,
+      "court_signal_frames": 298,
+      "court_signal_ratio": 0.81,
+      "hit_count": 4,
+      "bounce_count": 6
+    },
+    {
+      "segment_id": 11,
+      "start_frame": 4558,
+      "end_frame": 4761,
+      "duration_frames": 204,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 182.32,
+      "end_time_sec": 190.48,
+      "duration_sec": 8.16,
+      "tracknet_frames": 188,
+      "tracknet_ratio": 0.922,
+      "both_players_frames": 202,
+      "both_players_ratio": 0.99,
+      "court_signal_frames": 203,
+      "court_signal_ratio": 0.995,
+      "hit_count": 4,
+      "bounce_count": 7
+    },
+    {
+      "segment_id": 12,
+      "start_frame": 4863,
+      "end_frame": 5061,
+      "duration_frames": 199,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 194.52,
+      "end_time_sec": 202.48,
+      "duration_sec": 7.96,
+      "tracknet_frames": 184,
+      "tracknet_ratio": 0.925,
+      "both_players_frames": 135,
+      "both_players_ratio": 0.678,
+      "court_signal_frames": 136,
+      "court_signal_ratio": 0.683,
+      "hit_count": 2,
+      "bounce_count": 10
+    },
+    {
+      "segment_id": 13,
+      "start_frame": 5072,
+      "end_frame": 5346,
+      "duration_frames": 275,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 202.88,
+      "end_time_sec": 213.88,
+      "duration_sec": 11.0,
+      "tracknet_frames": 206,
+      "tracknet_ratio": 0.749,
+      "both_players_frames": 256,
+      "both_players_ratio": 0.931,
+      "court_signal_frames": 247,
+      "court_signal_ratio": 0.898,
+      "hit_count": 5,
+      "bounce_count": 4
+    },
+    {
+      "segment_id": 14,
+      "start_frame": 5357,
+      "end_frame": 5929,
+      "duration_frames": 573,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 214.28,
+      "end_time_sec": 237.2,
+      "duration_sec": 22.92,
+      "tracknet_frames": 456,
+      "tracknet_ratio": 0.796,
+      "both_players_frames": 573,
+      "both_players_ratio": 1.0,
+      "court_signal_frames": 518,
+      "court_signal_ratio": 0.904,
+      "hit_count": 10,
+      "bounce_count": 15
+    },
+    {
+      "segment_id": 15,
+      "start_frame": 6009,
+      "end_frame": 6373,
+      "duration_frames": 365,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 240.36,
+      "end_time_sec": 254.96,
+      "duration_sec": 14.6,
+      "tracknet_frames": 343,
+      "tracknet_ratio": 0.94,
+      "both_players_frames": 327,
+      "both_players_ratio": 0.896,
+      "court_signal_frames": 328,
+      "court_signal_ratio": 0.899,
+      "hit_count": 9,
+      "bounce_count": 10
+    },
+    {
+      "segment_id": 16,
+      "start_frame": 6476,
+      "end_frame": 6726,
+      "duration_frames": 251,
+      "end_reasons": [
+        "court_gap"
+      ],
+      "start_time_sec": 259.04,
+      "end_time_sec": 269.08,
+      "duration_sec": 10.04,
+      "tracknet_frames": 239,
+      "tracknet_ratio": 0.952,
+      "both_players_frames": 236,
+      "both_players_ratio": 0.94,
+      "court_signal_frames": 237,
+      "court_signal_ratio": 0.944,
+      "hit_count": 6,
+      "bounce_count": 7
+    }
+  ]
+}

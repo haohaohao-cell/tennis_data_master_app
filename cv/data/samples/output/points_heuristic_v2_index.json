@@ -1,0 +1,24 @@
+{
+  "source_video": "debug_minimap.mp4",
+  "fps": 25.0,
+  "config": {
+    "ball_break_sec": 1.2,
+    "ball_break_sec_with_players": 2.2,
+    "players_break_sec": 0.8,
+    "court_break_sec": 0.32,
+    "min_segment_sec": 2.0,
+    "start_ball_ratio": 0.28,
+    "start_players_ratio": 0.5,
+    "start_court_ratio": 0.5,
+    "min_ball_frames": 6,
+    "min_player_frames": 8,
+    "min_court_frames": 8,
+    "no_ball_support_ratio_for_extension": 0.7,
+    "min_both_players_ratio": 0.45,
+    "min_both_players_total_sec": 2.0,
+    "court_visible_min_keypoints": 9,
+    "court_gap_consecutive_frames": 10
+  },
+  "segment_count": 0,
+  "segments": []
+}

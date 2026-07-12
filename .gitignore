@@ -1,0 +1,13 @@
+# Python caches and local metadata
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Runtime video inputs and generated outputs
+cv/data/input/*
+!cv/data/input/.gitkeep
+cv/data/output/*
+!cv/data/output/.gitkeep
+
+# Local model weights
+cv/models/weights/*.pt

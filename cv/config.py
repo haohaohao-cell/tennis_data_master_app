@@ -1,0 +1,25 @@
+"""Central filesystem locations for the CV package."""
+
+from pathlib import Path
+
+
+CV_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = CV_ROOT.parent
+DATA_ROOT = CV_ROOT / "data"
+INPUT_DIR = DATA_ROOT / "input"
+OUTPUT_DIR = DATA_ROOT / "output"
+SAMPLES_DIR = DATA_ROOT / "samples"
+MODELS_DIR = CV_ROOT / "models"
+WEIGHTS_DIR = MODELS_DIR / "weights"
+EXPERIMENTS_DIR = CV_ROOT / "experiments"
+
+DEFAULT_BALL_MODEL_PATH = WEIGHTS_DIR / "model_best.pt"
+DEFAULT_PLAYER_MODEL_PATH = WEIGHTS_DIR / "yolov8x.pt"
+DEFAULT_COURT_MODEL_PATH = WEIGHTS_DIR / "model_tennis_court_det.pt"
+DEFAULT_DB_PATH = OUTPUT_DIR / "match_analysis.sqlite"
+
+
+def ensure_runtime_directories() -> None:
+    """Create local runtime directories without touching tracked samples."""
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
