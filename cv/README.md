@@ -10,24 +10,32 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 ```
 
 `run_inference_v2(...)` 仍返回 `(shots_payload, points_payload)`，JSON 与数据库字段保持不变。
+根目录的 `config.py` 统一定义数据、权重和默认数据库路径。
 
-## 模块划分
+## 模块索引
 
-| 目录 | 职责 |
+每个生产模块的目录内都有一份简短说明。以下链接也是推荐的阅读顺序。
+
+| 模块 | 职责 |
 | --- | --- |
-| `pipeline` | 端到端推理编排 |
-| `segmentation` | point 分段、缓存和视频切分 |
-| `builders` | 帧、shot、point payload 与坐标填补 |
-| `tracking` | 球、球员、身份、弹跳和轨迹处理 |
-| `court` | 球场检测、参考系、单应变换和坐标映射 |
-| `events` | 击球、发球、出界和触网检测 |
-| `analytics` | rally、球速和跑动距离统计 |
-| `persistence` | SQLite schema、连接和 repository |
-| `visualization` | 视频标注、minimap 和统计绘制 |
-| `io` | 视频与 JSON 读写 |
-| `models` | 模型实现与本地权重 |
-| `cli` | 可直接通过 `python -m` 执行的命令入口 |
-| `legacy` | 已停用但保留的旧推理实现 |
+| [`pipeline`](pipeline/README.md) | 端到端推理编排 |
+| [`segmentation`](segmentation/README.md) | point 分段、缓存和视频切分 |
+| [`builders`](builders/README.md) | 帧、shot、point payload 与坐标填补 |
+| [`tracking`](tracking/README.md) | 球、球员、身份、弹跳和轨迹处理 |
+| [`court`](court/README.md) | 球场检测、参考系、单应变换和坐标映射 |
+| [`events`](events/README.md) | 击球、发球、出界和触网检测 |
+| [`analytics`](analytics/README.md) | rally、球速和跑动距离统计 |
+| [`persistence`](persistence/README.md) | SQLite schema、连接和 repository |
+| [`visualization`](visualization/README.md) | 视频标注、minimap 和统计绘制 |
+| [`io`](io/README.md) | 视频与 JSON 读写 |
+| [`models`](models/README.md) | 模型实现与本地权重 |
+| [`cli`](cli/README.md) | 可通过 `python -m` 执行的命令入口 |
+| [`tests`](tests/README.md) | 不依赖大型模型的回归测试 |
+| [`legacy`](legacy/README.md) | 已停用但保留的旧推理实现 |
+
+以下模块保留原有说明，不重复创建：[`scripts`](scripts/CLAUDE.md)、
+[`scripts/my_utils`](scripts/my_utils/CLAUDE.md)、[`scripts/trackUtil`](scripts/trackUtil/CLAUDE.md)、
+[`experiments`](experiments/README.md) 和 [`models/ball_tracking`](models/ball_tracking/README.md)。
 
 ## 算法文档
 
