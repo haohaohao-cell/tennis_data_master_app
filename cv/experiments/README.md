@@ -32,6 +32,20 @@ jupyter lab
 
 先检查 overlay 视频，确认保留下来的坐标基本对应当前场地的网球，再进入下一步。
 
+### 多候选诊断（可选）
+
+文件：`generate_ball_candidates_json.ipynb`
+
+这个 notebook 复用第一步的 TrackNet 检测、Hough 圆提取、置信度计算和候选聚类，但不执行任何跨帧主球选择。它会保留每一帧的全部聚类候选，用于观察模型同时捕获到的当前场地网球、其他场地网球和噪点。
+
+主要输出：
+
+- `cv/data/output/ball_candidates_no_viterbi.json`
+- `cv/data/output/ball_candidates_no_viterbi.png`
+- `cv/data/output/ball_candidates_no_viterbi_overlay.mp4`
+
+PNG 分别绘制所有候选的 x 坐标、y 坐标和置信度；同一帧可以出现多个散点。视频会标记全部聚类候选的排名与置信度。该输出没有形成单一连续轨迹，不能直接输入 RANSAC、击球检测或落点检测。
+
 ### 2. 初步 RANSAC 轨迹处理
 
 文件：`trajectory_optimization_lab.ipynb`
