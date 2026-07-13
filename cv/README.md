@@ -29,6 +29,11 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 | `cli` | 可直接通过 `python -m` 执行的命令入口 |
 | `legacy` | 已停用但保留的旧推理实现 |
 
+## 算法文档
+
+- [击球检测算法](events/HIT_DETECTION.md)：轨迹突变、前后窗口、人球距离、远近端透视补偿和候选去抖。
+- [落点检测算法](tracking/BOUNCE_DETECTION.md)：垂直突变、方向夹角、局部极大值抑制、落点细化和界内外判断。
+
 ## 数据目录
 
 - `data/input`: 后端上传和本地待分析视频，不纳入版本控制。
