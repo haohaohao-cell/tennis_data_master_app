@@ -1,108 +1,82 @@
-# 轨迹实验说明
+# CV 实验模块
 
-本目录用于调试网球轨迹、击球点和落点检测。实验依赖 `cv` 包中的模型与工具，生成的中间文件统一写入 `cv/data/output/`；该目录是运行时目录，不纳入 Git。
+本目录用于验证网球检测、主轨迹选择和轨迹优化。实验逻辑验证稳定后，再迁移到 `cv/` 对应生产模块。
 
-## 推荐启动顺序
+输入视频放在 `cv/data/input/`，模型权重放在 `cv/models/weights/`，生成的 JSON、CSV、图片和视频统一写入 `cv/data/output/`。运行文件不提交到 Git。
 
-请在仓库根目录启动 Jupyter，确保 notebook 可以导入 `cv`：
+## 模块与边界
 
-```bash
-jupyter lab
-```
+| 顺序 | 模块                                     | 输入                | 输出                                  | 当前边界                                         |
+| ---- | ---------------------------------------- | ------------------- | ------------------------------------- | ------------------------------------------------ |
+| 1    | `generate_stable_court_roi_overlay.py` | 视频、球场检测权重  | ROI 首帧预览、overlay 视频            | 只生成并验证固定 ROI，尚未接入 TrackNet 候选评分 |
+| 2    | `generate_ball_coords_json.ipynb`      | 视频、TrackNet 权重 | 每帧候选 JSON、候选图和 overlay 视频  | 保留每帧全部候选，不执行时序主轨迹选择           |
+| 3    | Viterbi 主轨迹选择                       | 每帧候选、ROI       | 单一主球轨迹                          | 尚未实现                                         |
+| 4    | `trajectory_optimization_lab.ipynb`    | 已确定的单一主轨迹  | 优化轨迹、诊断图、CSV 和 overlay 视频 | 只负责异常点剔除与补点，不负责从多球中选主球     |
+| 5    | `generate_hit_points_json.ipynb`       | 优化后的单一轨迹    | 轨迹突变点                            | 后续实验                                         |
 
-然后按以下顺序运行 notebook。每个 notebook 都应从上到下执行，后一个 notebook 依赖前一个 notebook 生成的文件。
+## 为什么按这个顺序
 
-### 1. 提取和清理初始坐标
+### 1. 先生成并验证场地 ROI
 
-文件：`generate_ball_coords_json.ipynb`
+并排球场的视频中，TrackNet 可能同时检测到目标场地、隔壁场地和场边静止的球。ROI 用来提供“候选是否位于目标场地”的空间先验，后续可以降低 ROI 外候选的得分。场地检测可能受遮挡、机位和相机移动影响，因此必须先通过首帧预览和完整 overlay 视频人工确认 ROI，再把它用于候选评分。当前脚本只生成和验证 ROI，尚未接入 TrackNet。
 
-这个 notebook 使用 TrackNet 对视频逐帧检测网球，生成候选点并选择一条时间上连续的主球轨迹。处理重点包括：
+### 2. 再保留每帧全部 TrackNet 候选
 
-- 从三帧输入中提取网球候选坐标和置信度；
-- 过滤明显不可能的候选点和噪声；
-- 在同一画面存在多个候选点时，选择更符合时间连续性的主球轨迹；
-- 过滤其他场地或画面中非当前比赛网球的候选点，为后续轨迹拟合保留更干净的输入。
+这一阶段的目标是保存检测证据，而不是提前决定哪个点是主球。过早只保留一个候选会丢失真实球，后续算法也无法纠正错误选择。因此 JSON 中的 `candidates` 保存每帧全部候选及置信度，供 Viterbi 综合时序信息选择。兼容字段 `pixel` 只是该帧置信度最高的候选，不是经过时序选择的主轨迹。
 
-主要输出：
+### 3. 用 Viterbi 选择单一主球轨迹
 
-- `cv/data/output/ball_coords_raw.json`
-- `cv/data/output/ball_coords_match_frames.json`
-- `cv/data/output/ball_coords_raw_overlay.mp4`
-- `cv/data/output/ball_candidates_overlay.mp4`
+逐帧最高置信候选可能在主球、静止球、隔壁场球和误检之间切换。Viterbi 需要同时考虑 TrackNet 置信度、ROI、预测位置、速度和加速度连续性、静止惩罚及缺失状态，以整段路径总分选择同一个运动目标。只有完成这一步，后续轨迹优化的输入才具有明确的主球身份。该模块目前尚未实现。
 
-先检查 overlay 视频，确认保留下来的坐标基本对应当前场地的网球，再进入下一步。
+Viterbi 完成前，多球练习视频仍可通过 `pixel` 跑通后续流程，但输出不能视为可靠的主球轨迹，也不适合用来评价轨迹优化的准确性。
 
-### 多候选诊断（可选）
+### 4. 对单一主轨迹剔除异常点并补点
 
-文件：`generate_ball_candidates_json.ipynb`
+即使已经选定主球，TrackNet 仍可能产生短时漏检、坐标尖刺和局部偏移。因此需要用运动连续性和 RANSAC 识别异常点，并在可信区间内补齐缺失坐标。这一步不再处理“哪个球是主球”的问题，否则无法判断错误来自主轨迹选择还是异常点优化。
 
-这个 notebook 复用第一步的 TrackNet 检测、Hough 圆提取、置信度计算和候选聚类，但不执行任何跨帧主球选择。它会保留每一帧的全部聚类候选，用于观察模型同时捕获到的当前场地网球、其他场地网球和噪点。
+### 5. 检测突变点并分段拟合
 
-主要输出：
+一次击球或落地会改变球的速度和方向，使整段轨迹不再服从同一个二次函数。如果跨越突变点直接执行 RANSAC，拟合曲线会在事件附近产生偏差，还可能把真实转向当作异常点删除。因此先定位轨迹突变点，以它们作为分段边界，再对每段连续运动分别拟合。当前 `generate_hit_points_json.ipynb` 只负责寻找分段边界，不判断突变属于击球还是落地。
 
-- `cv/data/output/ball_candidates_no_viterbi.json`
-- `cv/data/output/ball_candidates_no_viterbi.png`
-- `cv/data/output/ball_candidates_no_viterbi_overlay.mp4`
+## 最短运行流程
 
-PNG 分别绘制所有候选的 x 坐标、y 坐标和置信度；同一帧可以出现多个散点。视频会标记全部聚类候选的排名与置信度。该输出没有形成单一连续轨迹，不能直接输入 RANSAC、击球检测或落点检测。
+从仓库根目录运行。准备 Python 3.11 环境及 notebook、PyTorch、OpenCV 等项目依赖后，将视频和权重放到上述目录。
 
-### 2. 初步 RANSAC 轨迹处理
+1. 生成并人工检查场地 ROI：
 
-文件：`trajectory_optimization_lab.ipynb`
+   ```bash
+   python cv/experiments/generate_stable_court_roi_overlay.py \
+     --input cv/data/input/match01.mp4
+   ```
 
-这个 notebook 读取第一步的坐标，对整段轨迹进行初步 RANSAC/二次曲线拟合，并对缺失点进行初步补点。它的主要用途是：
+   默认生成 `match01_court_roi_first_frame.jpg` 和 `match01_court_roi_overlay.mp4`。
+2. 启动 Jupyter：
 
-- 观察原始轨迹中的离群点和缺失区间；
-- 用抛物线模型估计相邻帧之间的合理轨迹；
-- 生成后续事件检测可以使用的初步轨迹候选。
+   ```bash
+   python -m jupyter lab
+   ```
 
-主要输出通常包括：
+   运行 `generate_ball_coords_json.ipynb`。将 `INPUT_VIDEO_PATH` 指向输入视频；调试时可设置 `MAX_FRAMES = 300`，完整运行时设为 `None`。
+3. 运行 `trajectory_optimization_lab.ipynb` 前，将 `MATCH_FRAMES_PATH` 改为上一步生成的 JSON，例如：
 
-- `cv/data/output/winransac_initial_trajectory_candidate.csv`
-- `cv/data/output/winransac_trajectory_candidate.csv`
-- 对应的轨迹可视化或调试结果。
+   ```python
+   MATCH_FRAMES_PATH = CV_OUTPUT_DIR / "match01_ball_coords_raw.json"
+   ```
 
-这一步的结果是初步结果，不应被理解为最终的完整轨迹。特别是击球和落点附近可能仍然存在较大残差。
+   多球视频可以用于调试流程；只有输入已是单一主轨迹，或标准单球片段中已人工确认 `pixel` 始终对应主球时，才能用输出评价轨迹优化效果。
 
-### 3. 检测突变点并按轨迹分段
+以 `match01.mp4` 为例，主要输出统一带有输入视频名：
 
-文件：`generate_hit_points_json.ipynb`
+- `match01_ball_coords_raw.json`
+- `match01_ball_coords_raw_overlay.mp4`
+- `match01_ball_coords_trajectory.png`
+- `match01_xy_function_coordinates.png`
+- `match01_ransac_trajectory_overlay.mp4`
 
-这个 notebook 在原始轨迹或初步 RANSAC 轨迹上检测击球点和落点等突变点，并将候选点聚合成最终的事件点。检测逻辑主要比较当前坐标与前后窗口均值的变化，识别运动方向或速度发生明显变化的帧。
+现有缺陷、待开发项和验收测试见 [ISSUES.md](ISSUES.md)。
 
-它随后以这些事件点作为轨迹边界，对每一段轨迹单独执行 RANSAC，并进行段内补点。主要输出包括：
+## 其他实验
 
-- `cv/data/output/hit_points_mean_reversal.json`
-- `cv/data/output/winransac_segmented_trajectory_candidate.csv`
-- `cv/data/output/hit_points_mean_reversal_overlay.mp4`
-
-## 为什么不能直接对整段轨迹做 RANSAC
-
-网球轨迹在两个连续事件之间通常可以近似为一段较平滑的二次曲线。但击球和落点会造成轨迹的突变：
-
-- 击球时，球的速度和方向发生变化；
-- 落地时，球的垂直运动和水平运动状态发生变化；
-- 两个事件前后的轨迹不属于同一个简单的二次函数。
-
-因此，如果把包含击球点、落点的整段轨迹直接交给 RANSAC，单个模型需要同时解释多个不同运动阶段。结果通常会出现以下问题：
-
-- 突变点被误判为离群点；
-- 拟合曲线在事件附近偏离真实轨迹；
-- 补点会跨越事件边界，产生不符合物理运动的坐标；
-- 一个阶段的曲线会影响另一个阶段的拟合参数。
-
-当前方案是先检测事件，再将每两个相邻事件之间的轨迹视为独立片段，最后对每个片段分别进行 RANSAC。这样每个模型只需要拟合一个相对连续的运动阶段，能够更稳定地完成离群点过滤和缺失点补全，同时保留击球点和落点本身作为轨迹边界。
-
-## 调试与参数实验
-
-文件：`testransac.ipynb`
-
-这个 notebook 用于独立测试 RANSAC 参数、拟合效果和轨迹可视化。它不是主流程的必需步骤。建议在主流程产物已经生成后，用它比较不同阈值、迭代次数和补点策略，再将确认后的参数同步回主 notebook。
-
-## 运行注意事项
-
-- 运行前确认 `cv/models/weights/model_best.pt` 存在；模型权重默认不纳入 Git，需要在本地准备。
-- 修改 notebook 中的视频路径、输入 JSON 路径或输出路径时，优先使用 `cv.config` 中的目录配置。
-- 如果第一步的候选点明显包含其他场地网球或大量噪声，不要直接调高 RANSAC 阈值；应先检查候选筛选和主轨迹选择。
-- 如果第二步的整段拟合在击球或落点附近残差很大，这是预期现象，应继续执行第三步的事件分段处理。
-- 每次重新运行时，建议清理或确认 `cv/data/output/` 中的旧 CSV/JSON，避免 notebook 读取到上一次实验的结果。
+| 文件 | 用途 |
+| --- | --- |
+| `generate_ball_candidates_json.ipynb` | 旧版多候选提取与可视化参考 |

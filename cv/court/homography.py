@@ -7,7 +7,7 @@ from scipy.spatial import distance
 def get_trans_matrix(points, court_ref=None):
     """计算透视变换矩阵"""
     if court_ref is None:
-        from .court_reference import CourtReference
+        from .reference import CourtReference
         court_ref = CourtReference()
 
     refer_kps = np.array(court_ref.key_points, dtype=np.float32).reshape((-1, 1, 2))
