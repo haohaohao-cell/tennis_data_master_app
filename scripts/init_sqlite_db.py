@@ -8,7 +8,18 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA_PATH = ROOT_DIR / "backend" / "db" / "schema.sql"
 DEFAULT_DB_PATH = ROOT_DIR / "backend" / "db" / "tennis_data_master.sqlite3"
-EXPECTED_TABLES = ("users", "uploads", "points", "shots")
+EXPECTED_TABLES = (
+    "users",
+    "lessons",
+    "lesson_students",
+    "tennis_activities",
+    "videos",
+    "video_shares",
+    "social_posts",
+    "post_media",
+    "points",
+    "shots",
+)
 
 
 def parse_args() -> argparse.Namespace:

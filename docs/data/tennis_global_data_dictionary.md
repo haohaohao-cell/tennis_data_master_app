@@ -14,7 +14,7 @@
 ## 一、使用原则
 
 1. 同一数据项在数据库、后端 DTO、前端类型、App 模型、CV 输出和接口文档中必须使用同一个字段名。
-2. 第一版落库字段以 `users`、`uploads`、`points`、`shots` 四张表为准。
+2. 当前核心落库字段以 `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`post_media`、`points`、`shots` 为准。
 3. Web 看板指标、趋势、诊断、视频片段、可视化点和明细页计算字段，除非出现在四张核心表中，否则均为 `非落库字段`。
 4. `非落库字段` 可以由数据库字段、`frame_data.jsonl`、算法结果或接口聚合计算得到，不要求第一版新增数据库列。
 5. `NULL` 表示未采集、未标注、不适用或历史数据缺失；`unknown` 表示已完成分析但无法可靠分类。
@@ -27,7 +27,7 @@
 
 | 数据层 | 是否持久化 | 主要载体 | 说明 |
 | --- | --- | --- | --- |
-| 用户与上传任务 | 落库 | `users`、`uploads` | 用户、视频文件、分析任务、机位和球员槽位 |
+| 用户、活动、课程、视频与动态 | 落库 | `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`post_media` | 用户身份、个人活动、课程关系、原始视频资产、分享和动态 |
 | 分与击球事实 | 落库 | `points`、`shots` | 每分、每拍、触球、落点、结果、置信度 |
 | 逐帧 CV 数据 | 文件持久化 | `frame_data.jsonl` | 每帧检测、跟踪、单应矩阵、球员位置、CV 置信度 |
 | 统计指标 | 非落库字段 | API 聚合结果 | Web/App 看板和历史趋势使用 |
@@ -128,14 +128,27 @@ player_b_name = "训练对手"
 
 ## 六、全局枚举
 
-### 1. 用户与上传枚举
+### 1. 用户、视频与业务对象枚举
 
 | 枚举字段 | 可选值 | 说明 |
 | --- | --- | --- |
 | `status` | `active`、`disabled`、`deleted` | 用户状态 |
 | `playing_hand` | `right`、`left`、`unknown` | 用户主要持拍手 |
-| `activity_type` | `match`、`training`、`drill` | 视频活动类型 |
-| `analysis_status` | `uploaded`、`processing`、`completed`、`failed` | 分析任务状态 |
+| `is_coach` | `true`、`false` | 用户是否具备教练身份 |
+| `coach_status` | `pending`、`active`、`disabled`、`rejected` | 教练身份状态 |
+| `activity_type` | `casual_hit`、`match`、`serve_training`、`forehand_training`、`backhand_training`、`multi_ball_drill`、`stroke_recording`、`post_match_review`、`lesson_practice`、`coach_demo`、`other` | 个人网球活动类型 |
+| `visibility` | `inherit`、`private`、`friends`、`specified_users`、`lesson_coach`、`lesson_participants`、`public` | 视频可见性；`inherit` 只用于 `videos.visibility` |
+| `default_visibility` | `private`、`friends`、`specified_users`、`lesson_coach`、`lesson_participants`、`public` | 网球活动默认可见性 |
+| `post_visibility` | `private`、`friends`、`followers`、`specified_users`、`public` | 社交动态可见性 |
+| `analysis_status` | `uploaded`、`queued`、`processing`、`completed`、`failed`、`canceled` | 视频分析任务状态 |
+| `lesson_type` | `private`、`group`、`camp`、`trial`、`other` | 课程类型 |
+| `lesson_status` | `draft`、`scheduled`、`completed`、`canceled` | 课程状态 |
+| `attendance_status` | `planned`、`attended`、`absent`、`canceled` | 学生出勤状态 |
+| `share_target_type` | `user`、`lesson_coach`、`lesson_students`、`lesson_participants`、`public_link` | 视频显式分享目标类型 |
+| `share_permission` | `view`、`comment`、`annotate`、`download` | 视频分享权限 |
+| `share_status` | `active`、`revoked`、`expired` | 视频分享状态 |
+| `post_status` | `draft`、`published`、`hidden`、`deleted` | 社交动态状态 |
+| `media_type` | `video`、`video_clip`、`image`、`data_card` | 动态媒体类型 |
 | `camera_view_angle` | `overhead`、`horizontal` | 机位垂直视角 |
 | `camera_view_position` | `side`、`rear`、`front`、`rear_side`、`front_side` | 机位水平方位 |
 
@@ -186,7 +199,7 @@ player_b_name = "训练对手"
 | `serve_direction` | `wide`、`body`、`t`、`unknown` | 发球方向 |
 | `depth_zone` | `shallow`、`middle`、`deep` | 击球深度区域 |
 | `shot_direction` | `crosscourt`、`down_the_line`、`center`、`unknown` | 击球线路。后续如增加边线、大角度等值，需先更新本枚举 |
-| `scope_type` | `upload`、`set`、`game`、`point`、`history` | 统计范围 |
+| `scope_type` | `video`、`activity`、`lesson`、`set`、`game`、`point`、`history` | 统计范围 |
 | `comparison_type` | `previous`、`recent_five`、`monthly`、`best`、`opponent`、`activity` | 历史对比维度 |
 | `insight_type` | `strength`、`weakness`、`trend`、`warning`、`recommendation` | 诊断类型 |
 | `clip_type` | `winner`、`forced_error`、`unforced_error`、`longest_rally`、`fastest_serve`、`high_quality_rally`、`typical_problem`、`tactical_pattern` | 视频片段类型 |
@@ -214,6 +227,9 @@ player_b_name = "训练对手"
 | `email` | VARCHAR(255) | 是 |  | 邮箱 | 非空时唯一，大小写不敏感 |
 | `status` | VARCHAR(20) | 否 | `active` | 用户状态 | `active`、`disabled`、`deleted` |
 | `playing_hand` | VARCHAR(10) | 否 | `right` | 用户主要持拍手 | `right`、`left`、`unknown` |
+| `is_coach` | BOOLEAN | 否 | `false` | 是否具备教练身份 | `true`、`false` |
+| `coach_status` | VARCHAR(20) | 是 |  | 教练身份状态 | `pending`、`active`、`disabled`、`rejected` |
+| `coach_verified_at` | TIMESTAMPTZ | 是 |  | 教练认证时间 |  |
 | `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
 | `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
 | `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
@@ -222,22 +238,124 @@ player_b_name = "训练对手"
 
 - `status IN ('active', 'disabled', 'deleted')`
 - `playing_hand IN ('right', 'left', 'unknown')`
+- `is_coach IN (true, false)`
+- `coach_status IN ('pending', 'active', 'disabled', 'rejected') OR coach_status IS NULL`
+- `is_coach = false` 时 `coach_status IS NULL`
 - `PRIMARY KEY (user_id)`
 - `UNIQUE INDEX lower(email) WHERE email IS NOT NULL AND deleted_at IS NULL`
 - `UNIQUE INDEX phone WHERE phone IS NOT NULL AND deleted_at IS NULL`
 
-### 2. `uploads` 上传记录表
+### 2. `lessons` 课程表
 
-一条记录代表一次视频上传和一次分析任务。
+一条记录代表一节教练课。课程不直接拥有视频，而是通过 `tennis_activities.lesson_id` 组织教练和学生各自的活动记录。
 
 | 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
 | --- | --- | --- | --- | --- | --- |
-| `upload_id` | UUID | 否 | 自动生成 | 上传记录主键 | 主键 |
-| `owner_user_id` | UUID | 否 |  | 上传者 | FK: `users.user_id` |
+| `lesson_id` | UUID | 否 | 自动生成 | 课程主键 | 主键 |
+| `coach_user_id` | UUID | 否 |  | 本节课教练 | FK: `users.user_id` |
+| `title` | VARCHAR(120) | 是 |  | 课程标题 |  |
+| `lesson_type` | VARCHAR(30) | 否 | `private` | 课程类型 | `private`、`group`、`camp`、`trial`、`other` |
+| `status` | VARCHAR(30) | 否 | `draft` | 课程状态 | `draft`、`scheduled`、`completed`、`canceled` |
+| `started_at` | TIMESTAMPTZ | 是 |  | 上课开始时间 |  |
+| `ended_at` | TIMESTAMPTZ | 是 |  | 上课结束时间 |  |
+| `location_name` | VARCHAR(120) | 是 |  | 场地名称 |  |
+| `court_surface` | VARCHAR(30) | 是 |  | 场地类型 | `hard`、`clay`、`grass`、`carpet`、`unknown` |
+| `training_content` | TEXT | 是 |  | 本节训练内容 |  |
+| `coach_summary` | TEXT | 是 |  | 教练总结 |  |
+| `homework` | TEXT | 是 |  | 全课通用作业 |  |
+| `next_focus` | TEXT | 是 |  | 下节课重点 |  |
+| `created_by_user_id` | UUID | 否 |  | 创建人 | FK: `users.user_id` |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (lesson_id)`
+- `coach_user_id REFERENCES users(user_id)`
+- `created_by_user_id REFERENCES users(user_id)`
+- `ended_at >= started_at OR ended_at IS NULL OR started_at IS NULL`
+- `INDEX (coach_user_id, started_at DESC)`
+- `INDEX (status, started_at DESC)`
+
+### 3. `lesson_students` 课程学生表
+
+一条记录代表某个学生参与某节课程，并保存该学生在本节课内的独立反馈、评价和作业。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `lesson_student_id` | UUID | 否 | 自动生成 | 课程学生记录主键 | 主键 |
+| `lesson_id` | UUID | 否 |  | 课程 ID | FK: `lessons.lesson_id` |
+| `student_user_id` | UUID | 否 |  | 学生用户 ID | FK: `users.user_id` |
+| `attendance_status` | VARCHAR(30) | 否 | `planned` | 出勤状态 | `planned`、`attended`、`absent`、`canceled` |
+| `performance_summary` | TEXT | 是 |  | 表现总结 |  |
+| `coach_feedback` | TEXT | 是 |  | 教练评价 |  |
+| `homework` | TEXT | 是 |  | 学生个人作业 |  |
+| `next_focus` | TEXT | 是 |  | 学生下节课重点 |  |
+| `technical_issues` | TEXT | 是 |  | 技术问题摘要 |  |
+| `created_by_user_id` | UUID | 否 |  | 创建人 | FK: `users.user_id` |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (lesson_student_id)`
+- `UNIQUE (lesson_id, student_user_id) WHERE deleted_at IS NULL`
+- `INDEX (lesson_id)`
+- `INDEX (student_user_id, created_at DESC)`
+
+### 4. `tennis_activities` 网球活动表
+
+一条记录代表某个用户自己的网球活动记录。`TennisActivity` 必须且只能属于一个用户。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `tennis_activity_id` | UUID | 否 | 自动生成 | 活动主键 | 主键 |
+| `owner_user_id` | UUID | 否 |  | 活动所有者 | FK: `users.user_id` |
+| `lesson_id` | UUID | 是 |  | 所属课程；普通活动为空 | FK: `lessons.lesson_id` |
+| `title` | VARCHAR(120) | 是 |  | 活动标题 |  |
+| `activity_type` | VARCHAR(30) | 否 | `other` | 活动类型 | 见枚举 |
+| `default_visibility` | VARCHAR(30) | 否 | `private` | 活动默认可见性 | 见枚举 |
+| `started_at` | TIMESTAMPTZ | 是 |  | 活动开始时间 |  |
+| `ended_at` | TIMESTAMPTZ | 是 |  | 活动结束时间 |  |
+| `location_name` | VARCHAR(120) | 是 |  | 场地名称 |  |
+| `court_surface` | VARCHAR(30) | 是 |  | 场地类型 | `hard`、`clay`、`grass`、`carpet`、`unknown` |
+| `opponent_user_id` | UUID | 是 |  | 对手用户 | FK: `users.user_id` |
+| `opponent_name` | VARCHAR(50) | 是 |  | 非注册对手显示名 |  |
+| `note` | TEXT | 是 |  | 用户备注 |  |
+| `analysis_summary_status` | VARCHAR(30) | 是 |  | 活动级分析汇总状态 | `pending`、`processing`、`completed`、`failed` |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (tennis_activity_id)`
+- `owner_user_id REFERENCES users(user_id)`
+- `lesson_id REFERENCES lessons(lesson_id)`
+- `opponent_user_id REFERENCES users(user_id)`
+- `INDEX (owner_user_id, created_at DESC)`
+- `INDEX (lesson_id, created_at DESC)`
+- `INDEX (activity_type, started_at DESC)`
+
+### 5. `videos` 原始视频表
+
+一条记录代表一个原始视频资产。视频可以属于某个 `TennisActivity`，但不直接属于 `Lesson`。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `video_id` | UUID | 否 | 自动生成 | 视频主键 | 主键 |
+| `tennis_activity_id` | UUID | 是 |  | 所属网球活动 | FK: `tennis_activities.tennis_activity_id` |
+| `owner_user_id` | UUID | 否 |  | 视频所有者 | FK: `users.user_id` |
+| `uploader_user_id` | UUID | 否 |  | 实际上传者 | FK: `users.user_id` |
 | `filename` | VARCHAR(255) | 否 |  | 系统生成的唯一视频文件名 | 唯一 |
 | `original_filename` | TEXT | 是 |  | 用户上传时的原始文件名 |  |
-| `activity_type` | VARCHAR(20) | 否 |  | 视频活动类型 | `match`、`training`、`drill` |
 | `video_path` | TEXT | 否 |  | 原始视频文件路径 | 唯一 |
+| `thumbnail_path` | TEXT | 是 |  | 封面图路径 |  |
+| `mime_type` | VARCHAR(100) | 是 |  | 文件 MIME 类型 |  |
+| `file_size_bytes` | BIGINT | 是 |  | 文件大小 | 字节 |
+| `file_hash` | VARCHAR(128) | 是 |  | 文件哈希 |  |
 | `video_duration_ms` | BIGINT | 是 |  | 视频总时长 | 毫秒 |
 | `video_frame_count` | BIGINT | 是 |  | 视频总帧数 | 帧 |
 | `video_fps` | REAL | 是 |  | 视频标称帧率 | fps |
@@ -252,50 +370,123 @@ player_b_name = "训练对手"
 | `player_a_name` | VARCHAR(50) | 是 |  | A 球员在本次视频中的显示名称 |  |
 | `player_b_name` | VARCHAR(50) | 是 |  | B 球员在本次视频中的显示名称 |  |
 | `primary_player_slot` | CHAR(1) | 是 |  | 用户主要关注球员 | `A`、`B`、`NULL` |
-| `analysis_status` | VARCHAR(30) | 否 | `uploaded` | 分析任务状态 | `uploaded`、`processing`、`completed`、`failed` |
+| `visibility` | VARCHAR(30) | 否 | `inherit` | 视频可见性 | 见枚举 |
+| `analysis_status` | VARCHAR(30) | 否 | `uploaded` | 分析任务状态 | 见枚举 |
 | `analysis_version` | VARCHAR(50) | 是 |  | 分析流程和算法版本 |  |
 | `error_message` | TEXT | 是 |  | 分析失败原因 |  |
 | `captured_at` | TIMESTAMPTZ | 是 |  | 视频实际拍摄时间 |  |
-| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 上传记录创建时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 视频记录创建时间 |  |
 | `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
 | `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
 
-`filename` 推荐生成规则：
+约束与索引：
 
-```text
-{user_id}_{timestamp_ms}_{upload_id}.{extension}
-```
+- `PRIMARY KEY (video_id)`
+- `UNIQUE (filename)`
+- `UNIQUE (video_path)`
+- `INDEX (tennis_activity_id, created_at DESC)`
+- `INDEX (owner_user_id, created_at DESC)`
+- `INDEX (uploader_user_id, created_at DESC)`
+- `INDEX (analysis_status, created_at)`
+- `INDEX (visibility)`
+- `INDEX (camera_view_angle, camera_view_position)`
+
+### 6. `video_shares` 视频分享表
+
+一条记录代表对某个视频的显式分享。课程默认关系可以参与权限判断，但不一定写入本表。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `video_share_id` | UUID | 否 | 自动生成 | 视频分享主键 | 主键 |
+| `video_id` | UUID | 否 |  | 被分享视频 | FK: `videos.video_id` |
+| `shared_by_user_id` | UUID | 否 |  | 分享发起人 | FK: `users.user_id` |
+| `target_type` | VARCHAR(30) | 否 |  | 分享目标类型 | 见枚举 |
+| `target_user_id` | UUID | 是 |  | 指定用户目标 | FK: `users.user_id` |
+| `target_lesson_id` | UUID | 是 |  | 指定课程目标 | FK: `lessons.lesson_id` |
+| `permission` | VARCHAR(30) | 否 | `view` | 分享权限 | 见枚举 |
+| `status` | VARCHAR(20) | 否 | `active` | 分享状态 | 见枚举 |
+| `expires_at` | TIMESTAMPTZ | 是 |  | 过期时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
 
 约束与索引：
 
-- `activity_type IN ('match', 'training', 'drill')`
-- `analysis_status IN ('uploaded', 'processing', 'completed', 'failed')`
-- `primary_player_slot IN ('A', 'B') OR primary_player_slot IS NULL`
-- `camera_view_angle IN ('overhead', 'horizontal') OR camera_view_angle IS NULL`
-- `camera_view_position IN ('side', 'rear', 'front', 'rear_side', 'front_side') OR camera_view_position IS NULL`
-- `video_duration_ms >= 0`
-- `video_frame_count >= 0`
-- `video_fps > 0`
-- `video_width_px > 0`
-- `video_height_px > 0`
-- `player_a_user_id <> player_b_user_id`
-- `PRIMARY KEY (upload_id)`
-- `UNIQUE (filename)`
-- `UNIQUE (video_path)`
-- `INDEX (owner_user_id, created_at DESC)`
-- `INDEX (analysis_status, created_at)`
-- `INDEX (camera_view_angle, camera_view_position)`
-- `INDEX (player_a_user_id, created_at DESC)`
-- `INDEX (player_b_user_id, created_at DESC)`
+- `PRIMARY KEY (video_share_id)`
+- `target_type = 'user'` 时 `target_user_id` 必填
+- `target_type IN ('lesson_coach', 'lesson_students', 'lesson_participants')` 时 `target_lesson_id` 必填
+- `INDEX (video_id, status)`
+- `INDEX (target_user_id, status)`
+- `INDEX (target_lesson_id, status)`
 
-### 3. `points` 每分表
+### 7. `social_posts` 社交动态表
+
+一条记录代表用户主动发布到社交区域的动态。动态可以引用活动，但删除动态不删除活动或视频。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `social_post_id` | UUID | 否 | 自动生成 | 动态主键 | 主键 |
+| `author_user_id` | UUID | 否 |  | 发布者 | FK: `users.user_id` |
+| `source_tennis_activity_id` | UUID | 是 |  | 来源活动 | FK: `tennis_activities.tennis_activity_id` |
+| `title` | VARCHAR(120) | 是 |  | 标题 |  |
+| `content` | TEXT | 是 |  | 正文 |  |
+| `visibility` | VARCHAR(30) | 否 | `private` | 动态可见性 | 见枚举 |
+| `status` | VARCHAR(30) | 否 | `draft` | 动态状态 | 见枚举 |
+| `published_at` | TIMESTAMPTZ | 是 |  | 发布时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (social_post_id)`
+- `author_user_id REFERENCES users(user_id)`
+- `source_tennis_activity_id REFERENCES tennis_activities(tennis_activity_id)`
+- `INDEX (author_user_id, created_at DESC)`
+- `INDEX (source_tennis_activity_id)`
+- `INDEX (status, published_at DESC)`
+
+### 8. `post_media` 动态媒体表
+
+一条记录代表动态中引用的一项媒体或数据卡片。引用视频片段时只保存开始和结束时间，不复制原始视频。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `post_media_id` | UUID | 否 | 自动生成 | 动态媒体主键 | 主键 |
+| `social_post_id` | UUID | 否 |  | 动态 ID | FK: `social_posts.social_post_id` |
+| `media_type` | VARCHAR(30) | 否 |  | 媒体类型 | 见枚举 |
+| `video_id` | UUID | 是 |  | 引用视频 | FK: `videos.video_id` |
+| `image_path` | TEXT | 是 |  | 图片路径 |  |
+| `data_card_type` | VARCHAR(50) | 是 |  | 数据卡片类型 |  |
+| `data_payload_json` | JSON | 是 |  | 数据卡片内容 | JSON |
+| `clip_start_ms` | BIGINT | 是 |  | 视频片段开始时间 | 毫秒 |
+| `clip_end_ms` | BIGINT | 是 |  | 视频片段结束时间 | 毫秒 |
+| `sort_order` | INTEGER | 否 | `0` | 排序 | 序号 |
+| `caption` | VARCHAR(255) | 是 |  | 媒体说明 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (post_media_id)`
+- `UNIQUE (social_post_id, sort_order) WHERE deleted_at IS NULL`
+- `media_type = 'video'` 时只允许 `video_id` 非空
+- `media_type = 'video_clip'` 时 `video_id`、`clip_start_ms`、`clip_end_ms` 必填，且 `clip_end_ms > clip_start_ms`
+- `media_type = 'image'` 时只允许 `image_path` 非空
+- `media_type = 'data_card'` 时只允许 `data_card_type`、`data_payload_json` 非空
+- `INDEX (social_post_id, sort_order)`
+- `video_id REFERENCES videos(video_id)`
+- `INDEX (video_id)`
+
+### 9. `points` 每分表
 
 一条记录代表视频中的一分。
 
 | 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
 | --- | --- | --- | --- | --- | --- |
 | `point_id` | UUID | 否 | 自动生成 | 每分主键 | 主键 |
-| `upload_id` | UUID | 否 |  | 所属上传记录 | FK: `uploads.upload_id` |
+| `video_id` | UUID | 否 |  | 所属视频 | FK: `videos.video_id` |
 | `point_index` | INTEGER | 否 |  | 本次上传中的第几分，从 1 开始 | 序号 |
 | `start_frame` | BIGINT | 否 |  | 这一分开始帧 | 帧，从 0 开始 |
 | `end_frame` | BIGINT | 是 |  | 这一分结束帧 | 帧，从 0 开始 |
@@ -365,10 +556,10 @@ player_b_name = "训练对手"
 - `total_shot_count >= in_play_shot_count`
 - `confidence BETWEEN 0 AND 1`
 - `PRIMARY KEY (point_id)`
-- `UNIQUE (upload_id, point_index)`
-- `INDEX (upload_id, start_time_ms)`
-- `INDEX (upload_id, winner_slot)`
-- `INDEX (upload_id, server_slot)`
+- `UNIQUE (video_id, point_index)`
+- `INDEX (video_id, start_time_ms)`
+- `INDEX (video_id, winner_slot)`
+- `INDEX (video_id, server_slot)`
 - `INDEX (terminal_shot_id)`
 
 发球摘要关系：
@@ -377,7 +568,7 @@ player_b_name = "训练对手"
 - `second_serve_used = false` 时，`second_serve_in = NULL`，`is_double_fault = false`。
 - `is_double_fault = true` 时，`first_serve_in = false`，`second_serve_used = true`，`second_serve_in = false`，`point_result = 'double_fault'`。
 
-### 4. `shots` 每拍表
+### 10. `shots` 每拍表
 
 一条记录代表一次球拍触球事件，以及本次触球后产生的球轨迹摘要。一发失误、发球擦网重发和二发分别作为独立 shot 保存。
 
@@ -493,7 +684,7 @@ player_b_name = "训练对手"
 frame_data.jsonl
 ```
 
-数据库通过 `uploads.frame_data_path` 找到对应文件，`uploads.frame_data_version` 标识逐帧数据结构版本。
+数据库通过 `videos.frame_data_path` 找到对应文件，`videos.frame_data_version` 标识逐帧数据结构版本。
 
 逐帧文件负责保存：
 
@@ -516,14 +707,14 @@ frame_data.jsonl
 
 | 字段 | 含义 | 单位/枚举 |
 | --- | --- | --- |
-| `upload_id` | 上传任务 ID | UUID string |
+| `video_id` | 视频 ID | UUID string |
 | `player_slot` | 球员 A 或 B | `A`、`B` |
 | `metric_code` | 本文件定义的指标字段名 | string |
 | `metric_name` | 指标显示名称 | string |
 | `metric_value` | 指标值 | 按 `metric_code` 单位 |
 | `metric_unit` | 单位 | string |
 | `sample_size` | 样本量 | count |
-| `scope_type` | 统计范围 | `upload`、`set`、`game`、`point`、`history` |
+| `scope_type` | 统计范围 | `video`、`activity`、`lesson`、`set`、`game`、`point`、`history` |
 | `scope_id` | 对应范围 ID | string/null |
 | `dimension` | 指标维度 | `serve`、`return`、`rally`、`movement` 等 |
 | `confidence` | 统计可信度 | 0～1 |
@@ -888,7 +1079,7 @@ frame_data.jsonl
 | `metric_value` | 当前值 |
 | `sample_size` | 样本量 |
 | `confidence` | 可信度 |
-| `upload_id` | 对应上传 |
+| `video_id` | 对应视频 |
 
 历史对比字段：
 
@@ -981,8 +1172,8 @@ frame_data.jsonl
 
 ### 1. 分与拍的引用关系
 
-- `uploads.upload_id` 是一次上传和分析任务的唯一 ID。
-- `points.upload_id` 必须指向 `uploads.upload_id`。
+- `videos.video_id` 是原始视频资产和视频分析结果的唯一 ID。
+- `points.video_id` 必须指向 `videos.video_id`。
 - `shots.point_id` 必须指向 `points.point_id`。
 - `points.terminal_shot_id` 指向结束该分的 `shots.shot_id`。
 - 应用层必须保证 `terminal_shot_id` 指向的 shot 属于当前 point。
