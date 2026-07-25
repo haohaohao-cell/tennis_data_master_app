@@ -8,7 +8,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-video", required=True)
     parser.add_argument("--model-path", default=str(DEFAULT_BALL_MODEL_PATH))
     parser.add_argument("--output-json", default=str(OUTPUT_DIR / "net_hit_result.json"))
-    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--end-frame", type=int, default=None)
 

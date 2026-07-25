@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+from cv.device import get_torch_device
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, pad=1, stride=1, bias=True):
@@ -91,7 +92,7 @@ class BallTrackerNet(nn.Module):
     
     
 if __name__ == '__main__':
-    device = 'cpu'
+    device = get_torch_device()
     model = BallTrackerNet().to(device)
     inp = torch.rand(1, 9, 360, 640)
     out = model(inp)

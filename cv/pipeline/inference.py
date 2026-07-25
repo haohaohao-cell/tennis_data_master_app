@@ -43,6 +43,7 @@ from cv.config import (
     DEFAULT_COURT_MODEL_PATH as COURT_MODEL_PATH,
     DEFAULT_PLAYER_MODEL_PATH as PLAYER_MODEL_PATH,
 )
+from cv.device import get_torch_device
 from cv.court.keypoints import get_matrix_from_model
 from cv.court.reference import CourtReference
 from cv.events.hit_detection import standalone_get_ball_shot_frames
@@ -114,7 +115,7 @@ def run_inference_v2(
     `points` database tables by the backend layer.
     """
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_torch_device()
     input_video_path = str(input_video_path)
     effective_upload_id = upload_id or slugify_upload_id(Path(input_video_path).name)
     output_dir_path = Path(output_dir) if output_dir is not None else Path(input_video_path).resolve().parent
@@ -136,7 +137,7 @@ def run_inference_v2(
     dummy_court = DummyCourtDetector(court_ref_instance)
 
     court_model = BallTrackerNet(out_channels=15).to(device)
-    court_model.load_state_dict(torch.load(court_model_path, map_location=device, weights_only=True))
+    court_model.load_state_dict(torch.load(court_model_path, map_location="cpu", weights_only=True))
     court_model.eval()
 
     ball_tracker = BallTrackerManager(model_path=ball_model_path, device=device)

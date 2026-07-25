@@ -1,15 +1,16 @@
 # modules/person_tracker.py
 import cv2
 import numpy as np
-import torch
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
+from cv.device import get_torch_device
 from .player_identity import PlayerIdentityManager
 
 
 class PersonTrackerManager:
     def __init__(self, detection_model):
         self.detection_model = detection_model
+        use_cuda = get_torch_device().type == "cuda"
 
         # 初始化 DeepSort 追踪器 (完全复刻你提供的参数)
         self.tracker = DeepSort(
@@ -21,9 +22,9 @@ class PersonTrackerManager:
             gating_only_position=False,
             override_track_class=None,
             embedder="mobilenet",
-            half=torch.cuda.is_available(),
+            half=use_cuda,
             bgr=True,
-            embedder_gpu=torch.cuda.is_available(),
+            embedder_gpu=use_cuda,
             polygon=False,
             today=None,
         )

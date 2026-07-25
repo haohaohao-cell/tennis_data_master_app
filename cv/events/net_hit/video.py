@@ -5,9 +5,8 @@ from dataclasses import asdict
 from typing import List, Optional, Tuple
 
 import cv2
-import torch
-
 from cv.models.ball_tracking.tracknet_runner import TrackNetRunner
+from cv.device import resolve_torch_device
 
 from .detector import NetHitConfig, detect_net_hits, make_horizontal_net_line
 
@@ -16,9 +15,7 @@ Point = Optional[Tuple[float, float]]
 
 
 def choose_device(device: str) -> str:
-    if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    return device
+    return str(resolve_torch_device(device))
 
 
 def extract_ball_track(

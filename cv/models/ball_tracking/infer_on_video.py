@@ -2,6 +2,7 @@ from .model import BallTrackerNet
 import torch
 import cv2
 from .general import postprocess
+from cv.device import get_torch_device, resolve_torch_device
 from tqdm import tqdm
 import numpy as np
 import argparse
@@ -29,7 +30,7 @@ def read_video(path_video):
     cap.release()
     return frames, fps
 
-def infer_model(frames, model):
+def infer_model(frames, model, device=None):
     """ Run pretrained model on a consecutive list of frames    
     :params
         frames: list of consecutive video frames
@@ -38,6 +39,7 @@ def infer_model(frames, model):
         ball_track: list of detected ball points
         dists: list of euclidean distances between two neighbouring ball points
     """
+    device = resolve_torch_device(device)
     height = 360
     width = 640
     dists = [-1]*2
@@ -66,7 +68,7 @@ def infer_model(frames, model):
     return ball_track, dists 
 
 
-def infer_model_3_frames(f2, f1, f0, model, device='cuda'):
+def infer_model_3_frames(f2, f1, f0, model, device=None):
     """
     输入连续三帧 f2, f1, f0 (f2最早，f0最新)
     返回 (x, y) 或 None
@@ -74,6 +76,7 @@ def infer_model_3_frames(f2, f1, f0, model, device='cuda'):
     if f2 is None or f1 is None or f0 is None:
         return None
 
+    device = resolve_torch_device(device)
     # 统一尺寸
     height, width = 360, 640
     img2 = cv2.resize(f2, (width, height))
@@ -204,8 +207,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     model = BallTrackerNet()
-    device = 'cuda'
-    model.load_state_dict(torch.load(args.model_path, map_location=device))
+    device = get_torch_device()
+    model.load_state_dict(torch.load(args.model_path, map_location="cpu", weights_only=True))
     model = model.to(device)
     model.eval()
     
