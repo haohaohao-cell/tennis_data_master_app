@@ -32,7 +32,7 @@ class GuardedTrajectoryOptimizationTests(unittest.TestCase):
 
         result = optimize_trajectory(coords, frame_height=1080, config=self.config)
 
-        self.assertEqual(result["diagnostics"][7]["status"], "event_raw_kept")
+        self.assertEqual(result["diagnostics"][7]["status"], "raw_kept")
         self.assertEqual(result["optimized"][7], [142.0, 400.0])
 
     def test_only_fills_a_short_bilateral_gap(self):
@@ -55,6 +55,23 @@ class GuardedTrajectoryOptimizationTests(unittest.TestCase):
 
         self.assertEqual(result["diagnostics"][0]["status"], "raw_kept_insufficient_context")
         self.assertEqual(result["optimized"][0], [900.0, 900.0])
+
+    def test_freezes_a_contaminated_run_and_preserves_its_boundary(self):
+        # Frames 6-8 are a coherent but wrong branch.  They must not enter the
+        # left anchor, while frame 9 is a real branch boundary and stays raw.
+        coords = [(100.0 + 2.0 * index, 300.0 + 5.0 * index) for index in range(6)]
+        coords.extend([(900.0, 900.0), (880.0, 880.0), (860.0, 860.0)])
+        coords.extend([(118.0 - 2.0 * index, 360.0 - 3.0 * index) for index in range(6)])
+
+        result = optimize_trajectory(coords, frame_height=1080, config=self.config)
+
+        for index, expected in zip((6, 7, 8), ([112.0, 330.0], [114.0, 335.0], [116.0, 340.0])):
+            self.assertEqual(result["diagnostics"][index]["status"], "frozen_left_ransac_corrected")
+            self.assertEqual(result["diagnostics"][index]["frozen_range"], [6, 8])
+            np.testing.assert_allclose(result["optimized"][index], expected, atol=1.0)
+
+        self.assertEqual(result["diagnostics"][9]["status"], "boundary_raw_kept")
+        self.assertEqual(result["optimized"][9], [118.0, 360.0])
 
 
 if __name__ == "__main__":
