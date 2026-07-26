@@ -1,5 +1,6 @@
 """Central filesystem locations for the CV package."""
 
+import os
 from pathlib import Path
 
 
@@ -14,6 +15,9 @@ WEIGHTS_DIR = MODELS_DIR / "weights"
 EXPERIMENTS_DIR = CV_ROOT / "experiments"
 
 DEFAULT_BALL_MODEL_PATH = WEIGHTS_DIR / "model_best.pt"
+DEFAULT_GRIDTRACKNET_MODEL_PATH = Path(
+    os.environ.get("GRIDTRACKNET_MODEL_PATH", WEIGHTS_DIR / "model_weights.h5")
+)
 DEFAULT_PLAYER_MODEL_PATH = WEIGHTS_DIR / "yolov8x.pt"
 DEFAULT_COURT_MODEL_PATH = WEIGHTS_DIR / "model_tennis_court_det.pt"
 DEFAULT_DB_PATH = OUTPUT_DIR / "match_analysis.sqlite"

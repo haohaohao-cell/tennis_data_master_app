@@ -1,12 +1,12 @@
 import argparse
 
-from cv.config import DEFAULT_BALL_MODEL_PATH, OUTPUT_DIR
+from cv.config import DEFAULT_GRIDTRACKNET_MODEL_PATH, OUTPUT_DIR
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run top-down net-hit detection directly on a video.")
     parser.add_argument("--input-video", required=True)
-    parser.add_argument("--model-path", default=str(DEFAULT_BALL_MODEL_PATH))
+    parser.add_argument("--model-path", default=str(DEFAULT_GRIDTRACKNET_MODEL_PATH))
     parser.add_argument("--output-json", default=str(OUTPUT_DIR / "net_hit_result.json"))
     parser.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     parser.add_argument("--start-frame", type=int, default=0)

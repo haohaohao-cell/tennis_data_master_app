@@ -1,7 +1,7 @@
 """End-to-end tennis analysis pipeline v2.
 
-This version keeps the original model stack from `run_inference.py`, but
-changes the orchestration:
+This version uses GridTrackNet for ball coordinates and keeps the existing
+court/player/event orchestration:
 1. Run frame-level detection / tracking / event inference.
 2. Build an in-memory `match_frames` style payload.
 3. Segment points with the custom heuristic from `split_video_by_point.py`.
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,8 +38,8 @@ from cv.builders.match import (
 )
 from cv.builders.shots import slugify_upload_id
 from cv.config import (
-    DEFAULT_BALL_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_COURT_MODEL_PATH as COURT_MODEL_PATH,
+    DEFAULT_GRIDTRACKNET_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_PLAYER_MODEL_PATH as PLAYER_MODEL_PATH,
 )
 from cv.device import get_torch_device
@@ -52,7 +51,6 @@ from cv.events.net_hit.detector import NetHitConfig, detect_net_hits, make_horiz
 from cv.events.shot_classifier import ShotClassifier
 from cv.models.court_detection import BallTrackerNet
 from cv.segmentation.points import SegmentationConfig
-from cv.tracking.ball import BallTrackerManager
 from cv.tracking.bounce import BounceDetectorManager
 from cv.tracking.person import PersonTrackerManager
 
@@ -140,7 +138,45 @@ def run_inference_v2(
     court_model.load_state_dict(torch.load(court_model_path, map_location="cpu", weights_only=True))
     court_model.eval()
 
-    ball_tracker = BallTrackerManager(model_path=ball_model_path, device=device)
+    ball_model_file = Path(ball_model_path)
+    if not ball_model_file.exists():
+        raise FileNotFoundError(
+            "GridTrackNet H5 model not found. Set --ball_model_path or GRIDTRACKNET_MODEL_PATH. "
+            f"Current value: {ball_model_file}"
+        )
+    try:
+        from cv.models.ball_tracking.gridtracknet import (
+            GridTrackNet,
+            extract_gridtracknet_coords,
+            load_gridtracknet_h5,
+        )
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("GridTrackNet production inference requires TensorFlow.") from exc
+
+    gridtracknet_model = GridTrackNet()
+    load_gridtracknet_h5(gridtracknet_model, ball_model_file)
+
+    def report_gridtracknet_progress(current: int, total: int) -> None:
+        if progress_callback is not None:
+            progress_callback("ball_tracking", current, total, "正在运行 GridTrackNet 球坐标推理")
+
+    if progress_callback is not None:
+        progress_callback("ball_tracking", 0, total_frames, "正在运行 GridTrackNet 球坐标推理")
+    grid_ball_records, _ = extract_gridtracknet_coords(
+        input_video_path,
+        gridtracknet_model,
+        confidence_threshold=0.5,
+        progress_callback=report_gridtracknet_progress if progress_callback is not None else None,
+    )
+    if len(grid_ball_records) != total_frames:
+        raise RuntimeError(
+            "GridTrackNet returned coordinates for an unexpected number of frames: "
+            f"expected {total_frames}, got {len(grid_ball_records)}"
+        )
+    grid_ball_coords = [
+        tuple(record["pixel"]) if record.get("pixel") is not None else None
+        for record in grid_ball_records
+    ]
     yolo_detector = YoloDetectionWrapper(model_path=player_model_path, device=device)
     person_tracker = PersonTrackerManager(detection_model=yolo_detector)
 
@@ -151,7 +187,6 @@ def run_inference_v2(
     ball_detections_court: dict[int, list[float] | None] = {}
     raw_coords: list[Any] = []
 
-    tracknet_buffer: deque[np.ndarray] = deque(maxlen=3)
     frame_idx = 0
     last_good_matrix = np.eye(3)
     track_id_to_player_id: dict[int, int] = {}
@@ -216,12 +251,7 @@ def run_inference_v2(
                 player_court_dict[player_id] = None
         player_detections_court[frame_idx] = player_court_dict
 
-        tracknet_buffer.append(frame.copy())
-        ball_xy = None
-        if len(tracknet_buffer) == 3:
-            ball_xy = ball_tracker.runner.infer_model_3_frames(
-                tracknet_buffer[0], tracknet_buffer[1], tracknet_buffer[2]
-            )
+        ball_xy = grid_ball_coords[frame_idx]
         raw_coords.append(ball_xy)
 
         if ball_xy is not None:
@@ -247,7 +277,9 @@ def run_inference_v2(
     if progress_callback is not None:
         progress_callback("postprocess", 0, 4, "正在后处理轨迹")
 
-    final_coords = ball_tracker.process_trajectory(raw_coords, enable_smoothing=False)
+    # GridTrackNet coordinates are the production source of truth. Do not let
+    # legacy trajectory cleanup remove real hit or bounce discontinuities.
+    final_coords = list(raw_coords)
     bounce_detector = BounceDetectorManager(score_thresh=15.0)
     raw_bounces, _, _ = bounce_detector.detect(final_coords)
     enhanced_bounces = bounce_detector.enhance_subpixel(final_coords, raw_bounces)
