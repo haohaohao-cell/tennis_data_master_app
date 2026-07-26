@@ -43,8 +43,9 @@ from cv.config import (
     DEFAULT_PLAYER_MODEL_PATH as PLAYER_MODEL_PATH,
 )
 from cv.device import get_torch_device
-from cv.court.keypoints import get_matrix_from_model
+from cv.court.keypoints import get_matrix_from_model_with_ransac, project_reference_keypoints
 from cv.court.reference import CourtReference
+from cv.court.stability import estimate_stable_court_matrix
 from cv.events.hit_detection import standalone_get_ball_shot_frames
 from cv.events.in_out import evaluate_bounces_in_out
 from cv.events.net_hit.detector import NetHitConfig, detect_net_hits, make_horizontal_net_line
@@ -60,6 +61,9 @@ DEFAULT_PLAYER_MODEL_PATH = str(PLAYER_MODEL_PATH)
 DEFAULT_COURT_MODEL_PATH = str(COURT_MODEL_PATH)
 MIN_VISIBLE_COURT_KEYPOINTS = 9
 CONSECUTIVE_NO_COURT_END_FRAMES = 10
+COURT_STABILITY_SAMPLE_COUNT = 15
+COURT_STABILITY_MAX_DEVIATION_PX = 30.0
+COURT_STABILITY_MIN_CONSENSUS_SIZE = 5
 
 
 class YoloDetectionWrapper:
@@ -138,6 +142,32 @@ def run_inference_v2(
     court_model.load_state_dict(torch.load(court_model_path, map_location="cpu", weights_only=True))
     court_model.eval()
 
+    def detect_court_matrix(frame: np.ndarray) -> np.ndarray | None:
+        matrix, _ = get_matrix_from_model_with_ransac(frame, court_model, device, court_ref_instance)
+        return matrix
+
+    if progress_callback is not None:
+        progress_callback("court_stability", 0, COURT_STABILITY_SAMPLE_COUNT, "正在建立稳定球场坐标系")
+    stable_court = estimate_stable_court_matrix(
+        cap,
+        detect_court_matrix,
+        total_frames=total_frames,
+        sample_count=COURT_STABILITY_SAMPLE_COUNT,
+        court_ref=court_ref_instance,
+        max_deviation_px=COURT_STABILITY_MAX_DEVIATION_PX,
+        min_consensus_size=COURT_STABILITY_MIN_CONSENSUS_SIZE,
+    )
+    stable_court_matrix = stable_court.matrix
+    stable_court_points = project_reference_keypoints(stable_court_matrix, court_ref_instance)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    if progress_callback is not None:
+        progress_callback(
+            "court_stability",
+            COURT_STABILITY_SAMPLE_COUNT,
+            COURT_STABILITY_SAMPLE_COUNT,
+            "稳定球场坐标系已建立",
+        )
+
     ball_model_file = Path(ball_model_path)
     if not ball_model_file.exists():
         raise FileNotFoundError(
@@ -188,7 +218,7 @@ def run_inference_v2(
     raw_coords: list[Any] = []
 
     frame_idx = 0
-    last_good_matrix = np.eye(3)
+    last_good_matrix = stable_court_matrix
     track_id_to_player_id: dict[int, int] = {}
     progress_update_interval = max(1, total_frames // 200)
 
@@ -200,12 +230,8 @@ def run_inference_v2(
         if not ret:
             break
 
-        matrix, points = get_matrix_from_model(frame, court_model, device)
-        court_points_all.append(points)
-        court_matrices_all.append(matrix)
-
-        if matrix is not None:
-            last_good_matrix = matrix
+        court_points_all.append(stable_court_points)
+        court_matrices_all.append(stable_court_matrix)
         dummy_court.court_warp_matrix.append(last_good_matrix)
 
         tracks = person_tracker.update(frame, dummy_court)
@@ -404,6 +430,17 @@ def run_inference_v2(
         progress_callback("postprocess", 4, 4, "正在生成比赛分析数据")
 
     metadata = build_metadata(fps, frame_width, frame_height, frame_idx)
+    metadata["court_stability"] = {
+        "source_frame": stable_court.frame_index,
+        "consensus_frames": list(stable_court.consensus_frame_indices),
+        "median_deviation_px": round(stable_court.median_deviation_px, 4),
+        "max_deviation_px": round(stable_court.max_deviation_px, 4),
+        "homography": stable_court_matrix.tolist(),
+        "keypoints": [
+            [round(float(point[0]), 2), round(float(point[1]), 2)]
+            for point in stable_court_points
+        ],
+    }
     match_tactics_payload = build_match_tactics_payload(metadata, rally_analysis, net_hit_events)
     match_frames_payload = build_match_frames_payload(
         metadata,

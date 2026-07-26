@@ -16,6 +16,9 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 `cv/models/weights/model_weights.h5`，或设置 `GRIDTRACKNET_MODEL_PATH`；
 `--ball_model_path` 也可覆盖该路径。旧的 `model_best.pt` 仅供 legacy 路径使用。
 
+固定机位视频的生产球场定位会从 15 个均匀采样帧中选择共识单应矩阵，
+再将同一稳定球场坐标系用于全视频坐标映射。
+
 ## 模块索引
 
 每个生产模块的目录内都有一份简短说明。以下链接也是推荐的阅读顺序。
