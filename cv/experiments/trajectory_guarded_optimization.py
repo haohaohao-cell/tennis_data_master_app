@@ -44,6 +44,9 @@ class GuardedTrajectoryConfig:
     event_angle_deg: float = 25.0
     event_speed_ratio: float = 1.8
     min_event_speed_px: float = 1.0
+    min_h1_improvement_px: float = 2.0
+    min_h1_improvement_ratio: float = 0.35
+    min_event_persistence_points: int = 3
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,23 @@ class SideModel:
     inlier_count: int
     sample_count: int
     median_residual_px: float
+
+
+@dataclass(frozen=True)
+class SegmentEvidence:
+    """Comparison of one continuous-model and two-branch hypotheses."""
+
+    h0: SideModel | None
+    left: SideModel | None
+    right: SideModel | None
+    h0_error_px: float | None
+    h1_error_px: float | None
+    residual_improvement_px: float | None
+    residual_improvement_ratio: float | None
+    persistence_points: int
+    event_angle_deg: float | None
+    speed_ratio: float | None
+    accepted: bool
 
 
 def as_point(value: Any) -> np.ndarray | None:
@@ -177,6 +197,126 @@ def velocity_metrics(left: SideModel | None, right: SideModel | None) -> tuple[f
     angle = float(np.degrees(np.arccos(cosine)))
     speed_ratio = max(left_speed, right_speed) / min(left_speed, right_speed)
     return angle, speed_ratio
+
+
+def compare_segment_hypotheses(
+    coords: list[np.ndarray | None],
+    frozen_range: tuple[int, int],
+    *,
+    frame_height: int,
+    config: GuardedTrajectoryConfig,
+) -> SegmentEvidence:
+    """Score H0 (one model) against H1 (left/right models) for a frozen run.
+
+    All models are fitted from points outside the run.  H1 is only accepted
+    when it materially reduces robust residuals, has a persistent right-hand
+    branch, and exhibits the same velocity discontinuity used by the boundary
+    guard.  This keeps a short detector spike under H0 even when both sides
+    independently have enough samples to fit.
+    """
+    start, end = frozen_range
+    span = max(config.context_half, config.anchor_window)
+    left_start = max(0, start - span)
+    target_index = min(end + 1, max(0, len(coords) - 1))
+    right_end = min(len(coords), target_index + span + 1)
+    left_indices = [
+        index for index in range(left_start, start) if coords[index] is not None
+    ]
+    right_indices = [
+        index for index in range(target_index + 1, right_end) if coords[index] is not None
+    ]
+    h0_indices = left_indices + right_indices
+    h0 = fit_anchor_ransac(
+        coords,
+        h0_indices,
+        target_index,
+        frame_height=frame_height,
+        config=config,
+    )
+    left = fit_anchor_ransac(
+        coords,
+        left_indices,
+        target_index,
+        frame_height=frame_height,
+        config=config,
+    )
+    right = fit_anchor_ransac(
+        coords,
+        right_indices,
+        target_index,
+        frame_height=frame_height,
+        config=config,
+    )
+
+    h0_error = None
+    if h0 is not None and h0.inlier_count >= config.min_side_points:
+        # Penalize a single-model fit that only explains one side of the run.
+        # Without this term, RANSAC can report a zero median while silently
+        # abandoning the other branch, making H0 look deceptively good.
+        inlier_ratio = h0.inlier_count / max(h0.sample_count, 1)
+        h0_error = float(
+            h0.median_residual_px
+            + config.base_threshold_px * 2.0 * max(0.0, 1.0 - inlier_ratio)
+        )
+    branch_models = [model for model in (left, right) if strong_model(model, config)]
+    if len(branch_models) == 2:
+        total_inliers = sum(model.inlier_count for model in branch_models)
+        h1_error = float(
+            sum(model.median_residual_px * model.inlier_count for model in branch_models)
+            / max(total_inliers, 1)
+        )
+    else:
+        h1_error = None
+
+    improvement = None
+    improvement_ratio = None
+    if h0_error is not None and h1_error is not None:
+        improvement = h0_error - h1_error
+        improvement_ratio = improvement / max(abs(h0_error), 1e-6)
+
+    angle, speed_ratio = velocity_metrics(left, right)
+    candidate_close_to_right = False
+    candidate_index = end + 1
+    if right is not None and candidate_index < len(coords) and coords[candidate_index] is not None:
+        threshold = dynamic_threshold(float(right.prediction[1]), frame_height, config)
+        candidate_close_to_right = (
+            float(np.linalg.norm(coords[candidate_index] - right.prediction))
+            <= threshold * config.consensus_scale
+        )
+    persistence = 0
+    if right is not None:
+        persistence = sum(frame > end for frame in right.support_frames)
+        if candidate_close_to_right:
+            persistence += 1
+
+    discontinuous = (
+        (angle is not None and angle >= config.event_angle_deg)
+        or (speed_ratio is not None and speed_ratio >= config.event_speed_ratio)
+    )
+    accepted = bool(
+        h0_error is not None
+        and h1_error is not None
+        and improvement is not None
+        and improvement_ratio is not None
+        and improvement >= config.min_h1_improvement_px
+        and improvement_ratio >= config.min_h1_improvement_ratio
+        and persistence >= config.min_event_persistence_points
+        and discontinuous
+        and candidate_close_to_right
+    )
+    return SegmentEvidence(
+        h0=h0,
+        left=left,
+        right=right,
+        h0_error_px=h0_error,
+        h1_error_px=h1_error,
+        residual_improvement_px=improvement,
+        residual_improvement_ratio=improvement_ratio,
+        persistence_points=persistence,
+        event_angle_deg=angle,
+        speed_ratio=speed_ratio,
+        accepted=accepted,
+    )
 
 
 def short_gap_length(coords: list[np.ndarray | None], index: int) -> int:
@@ -304,24 +444,25 @@ def optimize_trajectory(
         for point, model in zip(coords, right_models)
     ]
 
-    boundary_indices: set[int] = set()
-    for _, end in frozen_ranges:
-        candidate = end + 1
-        if candidate >= len(coords) or coords[candidate] is None:
-            continue
-        left = left_models[candidate]
-        right = right_models[candidate]
-        angle, speed_ratio = velocity_metrics(left, right)
-        if not strong_model(left, config) or not strong_model(right, config):
-            continue
-        threshold = dynamic_threshold(float(right.prediction[1]), frame_height, config)
-        close_to_right = float(np.linalg.norm(coords[candidate] - right.prediction)) <= threshold * config.consensus_scale
-        discontinuous = (
-            (angle is not None and angle >= config.event_angle_deg)
-            or (speed_ratio is not None and speed_ratio >= config.event_speed_ratio)
+    segment_evidence: dict[tuple[int, int], SegmentEvidence] = {
+        frozen_range: compare_segment_hypotheses(
+            coords,
+            frozen_range,
+            frame_height=frame_height,
+            config=config,
         )
-        if close_to_right and discontinuous:
+        for frozen_range in frozen_ranges
+    }
+    boundary_indices: set[int] = set()
+    for frozen_range, evidence in segment_evidence.items():
+        candidate = frozen_range[1] + 1
+        if evidence.accepted and candidate < len(coords):
             boundary_indices.add(candidate)
+    evidence_by_boundary = {
+        frozen_range[1] + 1: evidence
+        for frozen_range, evidence in segment_evidence.items()
+        if frozen_range[1] + 1 < len(coords)
+    }
 
     optimized: list[np.ndarray | None] = []
     diagnostics: list[dict[str, Any]] = []
@@ -349,6 +490,11 @@ def optimize_trajectory(
         frozen_range = range_at(index, frozen_ranges)
         in_frozen_range = frozen_range is not None
         frozen_range_value = list(frozen_range) if frozen_range is not None else None
+        evidence = (
+            segment_evidence.get(frozen_range)
+            if frozen_range is not None
+            else evidence_by_boundary.get(index)
+        )
 
         if actual is None:
             gap_length = short_gap_length(coords, index)
@@ -445,6 +591,16 @@ def optimize_trajectory(
                 "frozen_range": frozen_range_value,
                 "frozen_ranges": [list(item) for item in frozen_ranges],
                 "boundary_frame": index if index in boundary_indices else None,
+                "h0_median_error_px": None if evidence is None else evidence.h0_error_px,
+                "h1_median_error_px": None if evidence is None else evidence.h1_error_px,
+                "h1_residual_improvement_px": None
+                if evidence is None or evidence.residual_improvement_px is None
+                else round(evidence.residual_improvement_px, 3),
+                "h1_residual_improvement_ratio": None
+                if evidence is None or evidence.residual_improvement_ratio is None
+                else round(evidence.residual_improvement_ratio, 3),
+                "event_persistence_points": None if evidence is None else evidence.persistence_points,
+                "h1_event_accepted": False if evidence is None else evidence.accepted,
                 "status": status,
                 "reason": reason,
             }
@@ -635,12 +791,18 @@ def main() -> None:
     parser.add_argument("--context-half", type=int, default=5)
     parser.add_argument("--max-fill-gap", type=int, default=2)
     parser.add_argument("--base-threshold", type=float, default=12.0)
+    parser.add_argument("--min-h1-improvement-px", type=float, default=2.0)
+    parser.add_argument("--min-h1-improvement-ratio", type=float, default=0.35)
+    parser.add_argument("--min-event-persistence-points", type=int, default=3)
     args = parser.parse_args()
 
     config = GuardedTrajectoryConfig(
         context_half=args.context_half,
         max_fill_gap=args.max_fill_gap,
         base_threshold_px=args.base_threshold,
+        min_h1_improvement_px=args.min_h1_improvement_px,
+        min_h1_improvement_ratio=args.min_h1_improvement_ratio,
+        min_event_persistence_points=args.min_event_persistence_points,
     )
     result, rows = run_file(args.input_json, args.output_json, config)
     output_xt = args.output_xt_plot or args.output_json.with_name(f"{args.output_json.stem}_xt.png")

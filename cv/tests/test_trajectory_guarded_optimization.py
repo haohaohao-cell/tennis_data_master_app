@@ -73,6 +73,21 @@ class GuardedTrajectoryOptimizationTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"][9]["status"], "boundary_raw_kept")
         self.assertEqual(result["optimized"][9], [118.0, 360.0])
 
+        evidence = result["diagnostics"][9]
+        self.assertTrue(evidence["h1_event_accepted"])
+        self.assertGreaterEqual(evidence["h1_residual_improvement_px"], self.config.min_h1_improvement_px)
+        self.assertGreaterEqual(evidence["event_persistence_points"], self.config.min_event_persistence_points)
+
+    def test_isolated_spike_does_not_win_h1(self):
+        coords = [(100.0 + 2.0 * index, 300.0 + index) for index in range(15)]
+        coords[7] = (900.0, 900.0)
+
+        result = optimize_trajectory(coords, frame_height=1080, config=self.config)
+
+        evidence = result["diagnostics"][7]
+        self.assertFalse(evidence["h1_event_accepted"])
+        self.assertNotEqual(result["diagnostics"][8]["status"], "boundary_raw_kept")
+
 
 if __name__ == "__main__":
     unittest.main()
