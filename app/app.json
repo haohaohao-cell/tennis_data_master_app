@@ -38,7 +38,21 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "用于在记录网球活动、上传视频和发布附近动态时获取当前位置；动态只保存城市或区，不保存精确经纬度。"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "用于读取所选视频的拍摄时间和拍摄位置信息，优先使用视频自带位置记录网球活动。",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

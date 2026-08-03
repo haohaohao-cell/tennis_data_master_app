@@ -1,0 +1,10 @@
+{
+  "name": "tennis-admin-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "node --check src/api.js && node --check src/mockData.js && node --check src/app.js && node --check server.mjs"
+  }
+}

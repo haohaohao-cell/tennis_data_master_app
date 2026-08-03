@@ -14,7 +14,7 @@
 ## 一、使用原则
 
 1. 同一数据项在数据库、后端 DTO、前端类型、App 模型、CV 输出和接口文档中必须使用同一个字段名。
-2. 当前核心落库字段以 `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`post_media`、`points`、`shots` 为准。
+2. 当前核心落库字段以 `users`、`coach_applications`、`coach_profiles`、`admin_users`、`admin_credentials`、`auth_identities`、`auth_sessions`、`auth_verification_codes`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`social_post_stats`、`post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`post_media`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports`、`points`、`shots` 为准。
 3. Web 看板指标、趋势、诊断、视频片段、可视化点和明细页计算字段，除非出现在四张核心表中，否则均为 `非落库字段`。
 4. `非落库字段` 可以由数据库字段、`frame_data.jsonl`、算法结果或接口聚合计算得到，不要求第一版新增数据库列。
 5. `NULL` 表示未采集、未标注、不适用或历史数据缺失；`unknown` 表示已完成分析但无法可靠分类。
@@ -27,7 +27,10 @@
 
 | 数据层 | 是否持久化 | 主要载体 | 说明 |
 | --- | --- | --- | --- |
-| 用户、活动、课程、视频与动态 | 落库 | `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`post_media` | 用户身份、个人活动、课程关系、原始视频资产、分享和动态 |
+| 认证、登录身份、会话与后台权限 | 落库 | `users`、`admin_users`、`admin_credentials`、`auth_identities`、`auth_sessions`、`auth_verification_codes` | App 内部用户、后台管理员授权、后台登录凭据、手机号/微信/Apple 等登录身份、设备会话和验证码记录 |
+| 教练身份申请与资料 | 落库 | `coach_applications`、`coach_profiles`、`users` | 普通用户申请认证教练或非职业教练，管理员审核后生成或更新用户扩展教练身份 |
+| 用户、活动、课程、视频与动态 | 落库 | `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`social_post_stats`、`post_media` | 用户身份、个人活动、课程关系、原始视频资产、分享、动态和动态统计 |
+| 社交关系、内容流行为、聊天与通知 | 落库 | `post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports` | Post 点赞/收藏/评论/分享、关注/互关、拉黑、隐私、浏览/隐藏、私信、群聊、陌生人消息请求、未读计数、通知事件、用户通知收件箱和举报 |
 | 分与击球事实 | 落库 | `points`、`shots` | 每分、每拍、触球、落点、结果、置信度 |
 | 逐帧 CV 数据 | 文件持久化 | `frame_data.jsonl` | 每帧检测、跟踪、单应矩阵、球员位置、CV 置信度 |
 | 统计指标 | 非落库字段 | API 聚合结果 | Web/App 看板和历史趋势使用 |
@@ -133,13 +136,27 @@ player_b_name = "训练对手"
 | 枚举字段 | 可选值 | 说明 |
 | --- | --- | --- |
 | `status` | `active`、`disabled`、`deleted` | 用户状态 |
+| `profile_completed` | `true`、`false` | 用户资料是否已完善 |
+| `auth_provider` | `phone`、`wechat`、`apple` | 登录身份来源；当前仅实现 `phone` |
+| `verification_purpose` | `login`、`bind_identity` | 验证码用途；当前仅实现登录验证码 |
 | `playing_hand` | `right`、`left`、`unknown` | 用户主要持拍手 |
-| `is_coach` | `true`、`false` | 用户是否具备教练身份 |
-| `coach_status` | `pending`、`active`、`disabled`、`rejected` | 教练身份状态 |
+| `is_coach` | `true`、`false` | 用户是否处于兼容教练状态；完整身份以 `coach_profiles` 和最新 `coach_applications` 为准 |
+| `coach_status` | `pending`、`active`、`disabled`、`rejected` | 兼容教练状态；审核中写 `pending`，通过写 `active`，暂停写 `disabled` |
+| `coach_type` | `certified`、`non_professional` | 教练类型：认证教练、非职业教练 |
+| `coach_application_status` | `pending`、`approved`、`rejected`、`canceled` | 教练身份申请审核状态 |
+| `coach_profile_status` | `active`、`suspended`、`revoked` | 已通过教练身份的生效状态 |
+| `admin_role` | `owner`、`admin`、`operator`、`viewer` | 后台管理员角色 |
+| `admin_status` | `active`、`disabled` | 后台管理员授权状态 |
 | `activity_type` | `casual_hit`、`match`、`serve_training`、`forehand_training`、`backhand_training`、`multi_ball_drill`、`stroke_recording`、`post_match_review`、`lesson_practice`、`coach_demo`、`other` | 个人网球活动类型 |
+| `activity_location_source` | `device_gps`、`video_metadata`、`manual_legacy`、`unavailable` | Tennis Activity 定位来源 |
+| `activity_coordinate_system` | `wgs84`、`gcj02` | Tennis Activity 定位坐标系 |
+| `location_resolve_source` | `area_city_boundary`、`unavailable` | 经纬度解析行政区来源 |
 | `visibility` | `inherit`、`private`、`friends`、`specified_users`、`lesson_coach`、`lesson_participants`、`public` | 视频可见性；`inherit` 只用于 `videos.visibility` |
 | `default_visibility` | `private`、`friends`、`specified_users`、`lesson_coach`、`lesson_participants`、`public` | 网球活动默认可见性 |
 | `post_visibility` | `private`、`friends`、`followers`、`specified_users`、`public` | 社交动态可见性 |
+| `post_review_status` | `pending`、`approved`、`rejected` | 社交动态审核状态 |
+| `post_location_scope` | `none`、`region`、`city` | 社交动态公开位置粒度 |
+| `upload_status` | `pending`、`uploading`、`uploaded`、`failed`、`canceled` | 视频文件上传生命周期状态 |
 | `analysis_status` | `uploaded`、`queued`、`processing`、`completed`、`failed`、`canceled` | 视频分析任务状态 |
 | `lesson_type` | `private`、`group`、`camp`、`trial`、`other` | 课程类型 |
 | `lesson_status` | `draft`、`scheduled`、`completed`、`canceled` | 课程状态 |
@@ -149,6 +166,24 @@ player_b_name = "训练对手"
 | `share_status` | `active`、`revoked`、`expired` | 视频分享状态 |
 | `post_status` | `draft`、`published`、`hidden`、`deleted` | 社交动态状态 |
 | `media_type` | `video`、`video_clip`、`image`、`data_card` | 动态媒体类型 |
+| `post_reaction_type` | `like` | Post 互动反应类型；第一版只实现点赞 |
+| `post_interaction_status` | `active`、`canceled` | Post 点赞和收藏事实状态 |
+| `post_comment_status` | `active`、`deleted`、`hidden` | Post 评论状态 |
+| `post_share_target_type` | `conversation`、`user`、`external`、`copy_link` | Post 分享目标类型 |
+| `follow_status` | `active`、`canceled` | 关注关系状态 |
+| `direct_message_policy` | `everyone`、`following`、`friends` | 用户私信接收策略 |
+| `message_request_status` | `pending`、`accepted`、`declined`、`blocked`、`canceled` | 陌生人消息请求状态 |
+| `report_target_type` | `user`、`social_post`、`post_comment`、`chat_message`、`chat_conversation`、`video` | 举报目标类型 |
+| `report_reason_type` | `spam`、`harassment`、`inappropriate`、`fraud`、`privacy`、`other` | 举报原因类型 |
+| `report_status` | `pending`、`reviewing`、`resolved`、`rejected` | 举报处理状态 |
+| `conversation_type` | `direct`、`group` | 私信或群聊 |
+| `conversation_group_type` | `friend_group`、`lesson_group`、`training_group`、`coach_course_group`、`custom` | 群聊业务类型 |
+| `conversation_member_role` | `owner`、`admin`、`member`、`coach`、`student` | 群聊成员角色 |
+| `conversation_member_status` | `active`、`left`、`removed` | 会话成员状态 |
+| `message_type` | `text`、`image`、`video`、`audio`、`file`、`post_share`、`video_share`、`activity_share`、`lesson_share`、`analysis_card`、`system_event`、`custom` | 通用消息类型 |
+| `message_status` | `sent`、`revoked`、`deleted` | 消息状态 |
+| `notification_category` | `interaction`、`system`、`ai`、`coach`、`lesson` | 通知分类 |
+| `notification_event_type` | `follow`、`post_like`、`post_comment`、`comment_reply`、`mention`、`video_shared`、`ai_analysis_completed`、`lesson_created`、`lesson_updated`、`coach_application_reviewed`、`system_announcement`、`custom` | 通知事件类型 |
 | `camera_view_angle` | `overhead`、`horizontal` | 机位垂直视角 |
 | `camera_view_position` | `side`、`rear`、`front`、`rear_side`、`front_side` | 机位水平方位 |
 
@@ -222,10 +257,11 @@ player_b_name = "训练对手"
 | --- | --- | --- | --- | --- | --- |
 | `user_id` | UUID | 否 | 自动生成 | 用户主键 | 主键 |
 | `nickname` | VARCHAR(50) | 否 |  | 用户昵称 |  |
-| `avatar_path` | TEXT | 是 |  | 头像文件路径 |  |
+| `avatar_path` | TEXT | 是 |  | 头像文件路径 | 用户上传头像使用 `/storage/avatars/...` 公开路径 |
 | `phone` | VARCHAR(30) | 是 |  | 手机号 | 非空时唯一 |
 | `email` | VARCHAR(255) | 是 |  | 邮箱 | 非空时唯一，大小写不敏感 |
 | `status` | VARCHAR(20) | 否 | `active` | 用户状态 | `active`、`disabled`、`deleted` |
+| `profile_completed` | BOOLEAN | 否 | `false` | 用户资料是否已完善 | `true`、`false` |
 | `playing_hand` | VARCHAR(10) | 否 | `right` | 用户主要持拍手 | `right`、`left`、`unknown` |
 | `is_coach` | BOOLEAN | 否 | `false` | 是否具备教练身份 | `true`、`false` |
 | `coach_status` | VARCHAR(20) | 是 |  | 教练身份状态 | `pending`、`active`、`disabled`、`rejected` |
@@ -237,6 +273,7 @@ player_b_name = "训练对手"
 约束与索引：
 
 - `status IN ('active', 'disabled', 'deleted')`
+- `profile_completed IN (true, false)`
 - `playing_hand IN ('right', 'left', 'unknown')`
 - `is_coach IN (true, false)`
 - `coach_status IN ('pending', 'active', 'disabled', 'rejected') OR coach_status IS NULL`
@@ -244,6 +281,222 @@ player_b_name = "训练对手"
 - `PRIMARY KEY (user_id)`
 - `UNIQUE INDEX lower(email) WHERE email IS NOT NULL AND deleted_at IS NULL`
 - `UNIQUE INDEX phone WHERE phone IS NOT NULL AND deleted_at IS NULL`
+
+说明：
+
+- `users.user_id` 是系统内部用户主键，所有视频、活动、课程、动态等业务对象必须引用该字段。
+- `users.phone` 是用户资料或手机号登录身份的冗余展示字段，不替代 `auth_identities` 中的登录身份记录。
+- `users.avatar_path` 保存用户头像的公开访问路径；第一版本地上传头像由后端写入 `/storage/avatars/{user_id}/...`。
+- 手机号、微信 openid、Apple subject 等外部身份都不应作为业务数据主键。
+- 教练身份不是独立账号；`users.is_coach`、`users.coach_status`、`users.coach_verified_at` 只作为兼容字段和列表筛选字段。前端身份展示、后端权限判断和后台审核必须优先读取 `coach_profiles` 与最新 `coach_applications`。
+
+### 1.1. `coach_applications` 教练身份申请表
+
+一条记录代表某个普通用户提交的一次教练身份申请。被拒绝后再次申请应创建新记录，不能覆盖历史审核记录。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `coach_application_id` | UUID | 否 | 自动生成 | 教练申请主键 | 主键 |
+| `applicant_user_id` | UUID | 否 |  | 申请用户 | FK: `users.user_id` |
+| `application_type` | VARCHAR(30) | 否 |  | 申请类型 | `certified`、`non_professional` |
+| `status` | VARCHAR(20) | 否 | `pending` | 审核状态 | `pending`、`approved`、`rejected`、`canceled` |
+| `display_name` | VARCHAR(50) | 否 |  | 教练展示名称 |  |
+| `real_name` | VARCHAR(50) | 是 |  | 真实姓名 |  |
+| `phone` | VARCHAR(30) | 是 |  | 联系电话 |  |
+| `city` | VARCHAR(80) | 是 |  | 所在城市 |  |
+| `specialties` | VARCHAR(255) | 是 |  | 擅长方向 | 逗号分隔文本 |
+| `coaching_experience` | TEXT | 是 |  | 教学或训练经历 |  |
+| `certification_title` | VARCHAR(120) | 是 |  | 资质名称 | 认证教练申请使用 |
+| `certification_file_path` | TEXT | 是 |  | 教练资质证明文件路径或 URL | 认证教练申请必填 |
+| `verification_video_path` | TEXT | 是 |  | 打球、教学或技术展示视频路径或 URL | 非职业教练申请必填 |
+| `note` | TEXT | 是 |  | 申请补充说明 |  |
+| `reviewer_user_id` | UUID | 是 |  | 审核管理员用户 | FK: `users.user_id` |
+| `reviewed_at` | TIMESTAMPTZ | 是 |  | 审核时间 |  |
+| `rejection_reason` | VARCHAR(500) | 是 |  | 拒绝原因 | 拒绝时必填 |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+
+约束与索引：
+
+- `application_type IN ('certified', 'non_professional')`
+- `status IN ('pending', 'approved', 'rejected', 'canceled')`
+- `application_type = 'certified'` 时 `certification_file_path` 必填
+- `application_type = 'non_professional'` 时 `verification_video_path` 必填
+- `UNIQUE INDEX (applicant_user_id) WHERE status = 'pending'`
+- `INDEX (status, created_at DESC)`
+- `INDEX (application_type, status)`
+
+### 1.2. `coach_profiles` 教练资料表
+
+一条记录代表某个用户已经通过审核后获得的教练扩展身份。认证教练和非职业教练共享同一张表，通过 `coach_type` 区分。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `coach_profile_id` | UUID | 否 | 自动生成 | 教练资料主键 | 主键 |
+| `user_id` | UUID | 否 |  | 对应普通用户账号 | FK: `users.user_id`，唯一 |
+| `coach_type` | VARCHAR(30) | 否 |  | 教练类型 | `certified`、`non_professional` |
+| `status` | VARCHAR(20) | 否 | `active` | 教练身份状态 | `active`、`suspended`、`revoked` |
+| `display_name` | VARCHAR(50) | 否 |  | 教练展示名称 |  |
+| `city` | VARCHAR(80) | 是 |  | 所在城市 |  |
+| `specialties` | VARCHAR(255) | 是 |  | 擅长方向 | 逗号分隔文本 |
+| `coaching_experience` | TEXT | 是 |  | 教学或训练经历 |  |
+| `certification_title` | VARCHAR(120) | 是 |  | 资质名称 | 仅认证教练展示认证资质标识 |
+| `certification_file_path` | TEXT | 是 |  | 资质证明文件路径或 URL | 后台审核资料 |
+| `verification_video_path` | TEXT | 是 |  | 非职业教练展示视频路径或 URL | 后台审核资料 |
+| `approved_application_id` | UUID | 是 |  | 最近通过的申请 | FK: `coach_applications.coach_application_id` |
+| `approved_by_user_id` | UUID | 是 |  | 审核通过管理员 | FK: `users.user_id` |
+| `approved_at` | TIMESTAMPTZ | 否 |  | 审核通过时间 |  |
+| `suspended_at` | TIMESTAMPTZ | 是 |  | 暂停时间 |  |
+| `revoked_at` | TIMESTAMPTZ | 是 |  | 撤销时间 |  |
+| `status_reason` | VARCHAR(500) | 是 |  | 暂停、恢复或撤销说明 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+
+约束与索引：
+
+- `UNIQUE (user_id)`
+- `coach_type IN ('certified', 'non_professional')`
+- `status IN ('active', 'suspended', 'revoked')`
+- `INDEX (status, coach_type)`
+- `INDEX (user_id, status)`
+
+### 1.3. `admin_users` 后台管理员授权表
+
+一条记录代表一个用户被授权为后台管理员。后台权限独立于普通用户资料，管理员接口必须先通过现有登录 token 识别用户，再检查 `admin_users.status = active`。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `admin_user_id` | UUID | 否 | 自动生成 | 后台授权记录主键 | 主键 |
+| `user_id` | UUID | 否 |  | 被授权用户 | FK: `users.user_id`，唯一 |
+| `role` | VARCHAR(30) | 否 | `operator` | 后台管理员角色 | `owner`、`admin`、`operator`、`viewer` |
+| `status` | VARCHAR(20) | 否 | `active` | 后台授权状态 | `active`、`disabled` |
+| `note` | VARCHAR(255) | 是 |  | 授权备注 |  |
+| `created_by_user_id` | UUID | 是 |  | 授权创建人；首次初始化可为空 | FK: `users.user_id` |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `disabled_at` | TIMESTAMPTZ | 是 |  | 禁用时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (admin_user_id)`
+- `UNIQUE (user_id)`
+- `role IN ('owner', 'admin', 'operator', 'viewer')`
+- `status IN ('active', 'disabled')`
+- `user_id REFERENCES users(user_id)`
+- `created_by_user_id REFERENCES users(user_id)`
+- `INDEX (status, role)`
+
+说明：
+
+- `admin_users` 只表达后台权限，不替代 `users` 用户身份。
+- 用户端接口不得读取 `admin_users` 决定普通用户业务行为。
+- 后台管理员首次初始化可通过运维脚本或数据库初始化数据写入，不能开放无鉴权创建管理员入口。
+
+### 1.4. `admin_credentials` 后台登录凭据表
+
+一条记录代表一个后台管理员的用户名密码凭据。该表只服务后台登录，不用于 App 用户端登录。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `admin_credential_id` | UUID | 否 | 自动生成 | 后台凭据主键 | 主键 |
+| `user_id` | UUID | 否 |  | 对应内部用户 | FK: `users.user_id`，唯一 |
+| `username` | VARCHAR(50) | 否 |  | 后台登录用户名 | 展示值 |
+| `username_normalized` | VARCHAR(50) | 否 |  | 规范化用户名 | 唯一，大小写不敏感匹配 |
+| `password_hash` | VARCHAR(255) | 否 |  | 密码哈希 | PBKDF2，不存明文密码 |
+| `status` | VARCHAR(20) | 否 | `active` | 凭据状态 | `active`、`disabled` |
+| `last_login_at` | TIMESTAMPTZ | 是 |  | 最近后台登录时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+
+约束与索引：
+
+- `PRIMARY KEY (admin_credential_id)`
+- `UNIQUE (user_id)`
+- `UNIQUE INDEX (username_normalized)`
+- `status IN ('active', 'disabled')`
+- `user_id REFERENCES users(user_id)`
+- `INDEX (user_id, status)`
+
+说明：
+
+- `password_hash` 保存 PBKDF2-SHA256 结果，测试账号初始密码也不应明文落库。
+- 后台登录必须同时满足 `admin_credentials.status = active`、`admin_users.status = active` 和 `users.status = active`。
+
+### 1.5. `auth_identities` 登录身份表
+
+一条记录代表某个用户绑定的一种登录身份。一个用户可以绑定多个登录身份。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `identity_id` | UUID | 否 | 自动生成 | 登录身份主键 | 主键 |
+| `user_id` | UUID | 否 |  | 所属内部用户 | FK: `users.user_id` |
+| `provider` | VARCHAR(30) | 否 |  | 登录身份来源 | `phone`、`wechat`、`apple` |
+| `provider_subject` | VARCHAR(255) | 否 |  | provider 原始身份标识 | 手机号、微信 openid、Apple subject 等 |
+| `provider_subject_normalized` | VARCHAR(255) | 否 |  | 规范化后的身份标识 | 用于唯一匹配 |
+| `is_verified` | BOOLEAN | 否 | `false` | 该身份是否已验证 | `true`、`false` |
+| `verified_at` | TIMESTAMPTZ | 是 |  | 验证完成时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+| `deleted_at` | TIMESTAMPTZ | 是 |  | 软删除时间 |  |
+
+约束与索引：
+
+- `provider IN ('phone', 'wechat', 'apple')`
+- `user_id REFERENCES users(user_id)`
+- `UNIQUE INDEX (provider, provider_subject_normalized) WHERE deleted_at IS NULL`
+- `INDEX (user_id, provider)`
+
+### 1.6. `auth_sessions` 会话/token 表
+
+一条记录代表一个登录会话。当前使用服务端管理的 opaque token，客户端保存明文 token，数据库只保存 hash。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `session_id` | UUID | 否 | 自动生成 | 会话主键 | 主键 |
+| `user_id` | UUID | 否 |  | 会话所属用户 | FK: `users.user_id` |
+| `access_token_hash` | CHAR(64) | 否 |  | access token 的 SHA-256 hash | 不存明文 token |
+| `refresh_token_hash` | CHAR(64) | 否 |  | refresh token 的 SHA-256 hash | 不存明文 token |
+| `device_name` | VARCHAR(120) | 是 |  | 登录设备名称 |  |
+| `platform` | VARCHAR(50) | 是 |  | 登录平台 | iOS、Android、Web 等 |
+| `ip_address` | VARCHAR(64) | 是 |  | 登录或刷新时的 IP |  |
+| `user_agent` | VARCHAR(255) | 是 |  | 登录或刷新时的 User-Agent |  |
+| `access_expires_at` | TIMESTAMPTZ | 否 |  | access token 过期时间 |  |
+| `expires_at` | TIMESTAMPTZ | 否 |  | refresh/session 过期时间 |  |
+| `last_seen_at` | TIMESTAMPTZ | 否 | 当前时间 | 最近使用时间 |  |
+| `revoked_at` | TIMESTAMPTZ | 是 |  | 退出登录或服务端注销时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+
+约束与索引：
+
+- `user_id REFERENCES users(user_id)`
+- `UNIQUE INDEX access_token_hash`
+- `UNIQUE INDEX refresh_token_hash`
+- `INDEX (user_id, expires_at DESC) WHERE revoked_at IS NULL`
+
+### 1.7. `auth_verification_codes` 验证码记录表
+
+一条记录代表一次验证码请求。当前开发期验证码固定为 `000000`，不接真实短信；未来接短信服务时替换验证码发送和校验逻辑，不改变登录身份和会话模型。
+
+| 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
+| --- | --- | --- | --- | --- | --- |
+| `verification_code_id` | UUID | 否 | 自动生成 | 验证码记录主键 | 主键 |
+| `provider` | VARCHAR(30) | 否 | `phone` | 验证渠道 | 当前仅 `phone` |
+| `recipient` | VARCHAR(255) | 否 |  | 原始接收方 | 当前为手机号 |
+| `recipient_normalized` | VARCHAR(255) | 否 |  | 规范化接收方 | 用于查询和限流 |
+| `code_hash` | CHAR(64) | 否 |  | 验证码的 SHA-256 hash | 不存明文验证码 |
+| `purpose` | VARCHAR(30) | 否 | `login` | 验证码用途 | `login`、`bind_identity` |
+| `expires_at` | TIMESTAMPTZ | 否 |  | 验证码过期时间 |  |
+| `consumed_at` | TIMESTAMPTZ | 是 |  | 使用时间 |  |
+| `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
+| `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
+
+约束与索引：
+
+- `provider IN ('phone')`
+- `purpose IN ('login', 'bind_identity')`
+- `INDEX (provider, recipient_normalized, created_at DESC)`
+- `INDEX (expires_at)`
 
 ### 2. `lessons` 课程表
 
@@ -319,7 +572,18 @@ player_b_name = "训练对手"
 | `default_visibility` | VARCHAR(30) | 否 | `private` | 活动默认可见性 | 见枚举 |
 | `started_at` | TIMESTAMPTZ | 是 |  | 活动开始时间 |  |
 | `ended_at` | TIMESTAMPTZ | 是 |  | 活动结束时间 |  |
-| `location_name` | VARCHAR(120) | 是 |  | 场地名称 |  |
+| `location_name` | VARCHAR(120) | 是 |  | 场地名称；兼容旧手填与自动生成的粗粒度显示 |  |
+| `location_source` | VARCHAR(30) | 是 |  | 定位来源 | `device_gps`、`video_metadata`、`manual_legacy`、`unavailable` |
+| `location_latitude` | DOUBLE PRECISION | 是 |  | 精确纬度 | 仅活动所有者和后台可见 |
+| `location_longitude` | DOUBLE PRECISION | 是 |  | 精确经度 | 仅活动所有者和后台可见 |
+| `location_accuracy_m` | DOUBLE PRECISION | 是 |  | 定位精度 | 米 |
+| `location_captured_at` | TIMESTAMPTZ | 是 |  | 手机定位时间 | 仅活动所有者和后台可见 |
+| `location_country_code` | VARCHAR(8) | 是 |  | 国家代码 |  |
+| `location_region` | VARCHAR(80) | 是 |  | 省/州/地区 |  |
+| `location_city` | VARCHAR(80) | 是 |  | 城市 |  |
+| `location_district` | VARCHAR(80) | 是 |  | 区/县 |  |
+| `location_address_label` | VARCHAR(255) | 是 |  | 精确地址展示 | 仅活动所有者和后台可见 |
+| `location_coordinate_system` | VARCHAR(30) | 是 |  | 坐标系 | `wgs84`、`gcj02` |
 | `court_surface` | VARCHAR(30) | 是 |  | 场地类型 | `hard`、`clay`、`grass`、`carpet`、`unknown` |
 | `opponent_user_id` | UUID | 是 |  | 对手用户 | FK: `users.user_id` |
 | `opponent_name` | VARCHAR(50) | 是 |  | 非注册对手显示名 |  |
@@ -338,10 +602,20 @@ player_b_name = "训练对手"
 - `INDEX (owner_user_id, created_at DESC)`
 - `INDEX (lesson_id, created_at DESC)`
 - `INDEX (activity_type, started_at DESC)`
+- `INDEX (location_city, location_district, started_at DESC, tennis_activity_id DESC) WHERE deleted_at IS NULL`
+
+定位口径：
+
+- App 采集并保存的 Activity 经纬度使用 `wgs84`。
+- App 前台运行时维护内存级位置缓存：启动和回到前台时刷新一次，前台每 3 分钟刷新一次；业务创建/发布流程优先使用最近一次缓存坐标。
+- `device_gps` 表示手机系统定位得到的经纬度；`video_metadata` 表示上传或发布所选视频文件/相册资产自带的拍摄经纬度。当前不使用网络/IP 粗略定位兜底；无法取得手机或视频经纬度时使用 `unavailable`。
+- 后端行政区解析使用 AreaCity 三级行政区边界数据、Shapely 和 STRtree，不在本阶段引入 PostGIS；默认读取 `backend/data/area_city_ok_geo.csv`，同时支持 GeoJSON/JSON 边界文件；API 启动时预热边界索引，正常解析请求不承担大文件冷加载成本。
+- 边界数据坐标系由 `TENNIS_AREA_CITY_COORDINATE_SYSTEM` 配置，默认 `gcj02`；查询前后端负责把手机 `wgs84` 坐标转换到边界坐标系。
+- 经纬度获取成功且边界数据可用时，后端返回精确命中或最近行政区近似结果；只有解析依赖、边界数据不可用或客户端请求超时时，仍保存经纬度，`location_city` / `location_district` 可为空。
 
 ### 5. `videos` 原始视频表
 
-一条记录代表一个原始视频资产。视频可以属于某个 `TennisActivity`，但不直接属于 `Lesson`。
+一条记录代表一个原始视频资产。视频可以属于某个 `TennisActivity`，但不直接属于 `Lesson`。当视频仅作为手机直传动态素材使用时，`tennis_activity_id = NULL`，并通过 `post_media.video_id` 被某条 `social_posts` 引用；这类视频不应出现在训练 activity 列表中。
 
 | 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
 | --- | --- | --- | --- | --- | --- |
@@ -352,7 +626,7 @@ player_b_name = "训练对手"
 | `filename` | VARCHAR(255) | 否 |  | 系统生成的唯一视频文件名 | 唯一 |
 | `original_filename` | TEXT | 是 |  | 用户上传时的原始文件名 |  |
 | `video_path` | TEXT | 否 |  | 原始视频文件路径 | 唯一 |
-| `thumbnail_path` | TEXT | 是 |  | 封面图路径 |  |
+| `thumbnail_path` | TEXT | 是 |  | 封面图路径；上传完成后由后端生成，Tennis Activity 视频、手机直传 Post 视频和 Post 引用的视频片段共用该字段 |  |
 | `mime_type` | VARCHAR(100) | 是 |  | 文件 MIME 类型 |  |
 | `file_size_bytes` | BIGINT | 是 |  | 文件大小 | 字节 |
 | `file_hash` | VARCHAR(128) | 是 |  | 文件哈希 |  |
@@ -371,6 +645,9 @@ player_b_name = "训练对手"
 | `player_b_name` | VARCHAR(50) | 是 |  | B 球员在本次视频中的显示名称 |  |
 | `primary_player_slot` | CHAR(1) | 是 |  | 用户主要关注球员 | `A`、`B`、`NULL` |
 | `visibility` | VARCHAR(30) | 否 | `inherit` | 视频可见性 | 见枚举 |
+| `upload_status` | VARCHAR(30) | 否 | `pending` | 视频文件上传状态 | 见枚举 |
+| `upload_error_message` | TEXT | 是 |  | 上传失败原因 |  |
+| `uploaded_at` | TIMESTAMPTZ | 是 |  | 原始视频文件上传完成时间 |  |
 | `analysis_status` | VARCHAR(30) | 否 | `uploaded` | 分析任务状态 | 见枚举 |
 | `analysis_version` | VARCHAR(50) | 是 |  | 分析流程和算法版本 |  |
 | `error_message` | TEXT | 是 |  | 分析失败原因 |  |
@@ -388,8 +665,15 @@ player_b_name = "训练对手"
 - `INDEX (owner_user_id, created_at DESC)`
 - `INDEX (uploader_user_id, created_at DESC)`
 - `INDEX (analysis_status, created_at)`
+- `INDEX (upload_status, created_at)`
 - `INDEX (visibility)`
 - `INDEX (camera_view_angle, camera_view_position)`
+
+说明：
+
+- `tennis_activity_id = NULL` 只表示视频不是某次 Tennis Activity 的组成部分，不表示视频没有所有者。
+- 手机直传 Post 视频使用 `post_media.media_type = video` 引用独立视频；从 Tennis Activity 截取片段发布时使用 `post_media.media_type = video_clip` 引用原 activity 下的视频和片段时间范围。
+- 已上传视频应有 `thumbnail_path`，客户端的首页、我的动态、Activity 列表和详情页均使用该字段作为视频缩略图来源。
 
 ### 6. `video_shares` 视频分享表
 
@@ -432,6 +716,13 @@ player_b_name = "训练对手"
 | `content` | TEXT | 是 |  | 正文 |  |
 | `visibility` | VARCHAR(30) | 否 | `private` | 动态可见性 | 见枚举 |
 | `status` | VARCHAR(30) | 否 | `draft` | 动态状态 | 见枚举 |
+| `review_status` | VARCHAR(30) | 否 | `approved` | 审核状态 | `post_review_status` |
+| `reviewed_at` | TIMESTAMPTZ | 是 |  | 审核时间 |  |
+| `reviewer_user_id` | UUID | 是 |  | 审核人 | FK: `users.user_id` |
+| `review_reason` | VARCHAR(500) | 是 |  | 审核原因或拒绝原因 |  |
+| `location_scope` | VARCHAR(20) | 否 | `none` | 公开位置粒度 | `post_location_scope` |
+| `location_region` | VARCHAR(80) | 是 |  | 粗粒度地区 | 不保存精确坐标 |
+| `location_city` | VARCHAR(80) | 是 |  | 粗粒度城市 | 不保存精确坐标 |
 | `published_at` | TIMESTAMPTZ | 是 |  | 发布时间 |  |
 | `created_at` | TIMESTAMPTZ | 否 | 当前时间 | 创建时间 |  |
 | `updated_at` | TIMESTAMPTZ | 否 | 当前时间 | 更新时间 |  |
@@ -442,13 +733,18 @@ player_b_name = "训练对手"
 - `PRIMARY KEY (social_post_id)`
 - `author_user_id REFERENCES users(user_id)`
 - `source_tennis_activity_id REFERENCES tennis_activities(tennis_activity_id)`
+- `reviewer_user_id REFERENCES users(user_id)`
+- `location_scope = region` 时 `location_region` 必填
+- `location_scope = city` 时 `location_city` 必填
 - `INDEX (author_user_id, created_at DESC)`
 - `INDEX (source_tennis_activity_id)`
 - `INDEX (status, published_at DESC)`
+- `INDEX (review_status, status, published_at DESC, social_post_id DESC) WHERE deleted_at IS NULL`
+- `INDEX (location_city, location_region, published_at DESC, social_post_id DESC) WHERE deleted_at IS NULL`
 
 ### 8. `post_media` 动态媒体表
 
-一条记录代表动态中引用的一项媒体或数据卡片。引用视频片段时只保存开始和结束时间，不复制原始视频。
+一条记录代表动态中引用的一项媒体或数据卡片。手机直传短视频使用 `media_type = video` 引用一条独立 `videos` 记录；引用 Tennis Activity 中的视频片段时使用 `media_type = video_clip`，只保存开始和结束时间，不复制原始视频。
 
 | 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
 | --- | --- | --- | --- | --- | --- |
@@ -479,7 +775,80 @@ player_b_name = "训练对手"
 - `video_id REFERENCES videos(video_id)`
 - `INDEX (video_id)`
 
-### 9. `points` 每分表
+### 9. `social_post_stats`、`post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`user_post_views` 与 `user_post_hides` 内容流行为表
+
+`post_reactions`、`post_favorites`、`post_comments` 和 `post_shares` 保存 Post 互动事实，负责防重复、审计和通知来源。`social_post_stats` 保存 Post 基础互动统计缓存，作为接口展示和轻量排序输入，不替代事实表。`user_post_views` 保存某个用户是否已经看过某条 Post，是首页把已看内容后置的基础表；表结构预留浏览来源、首次/最近浏览时间、停留时长和浏览次数。`user_post_hides` 保存用户主动隐藏的 Post，隐藏后首页三个内容流默认排除。
+
+| 表 | 关键字段 |
+| --- | --- |
+| `social_post_stats` | `social_post_id`、`like_count`、`comment_count`、`favorite_count`、`share_count`、`view_count`、`updated_at` |
+| `post_reactions` | `reaction_id`、`social_post_id`、`user_id`、`reaction_type`、`status`、`source`、`reacted_at`、`canceled_at`、`created_at`、`updated_at` |
+| `post_favorites` | `favorite_id`、`social_post_id`、`user_id`、`status`、`source`、`favorited_at`、`canceled_at`、`created_at`、`updated_at` |
+| `post_comments` | `comment_id`、`social_post_id`、`author_user_id`、`parent_comment_id`、`root_comment_id`、`content`、`status`、`source`、`created_at`、`updated_at`、`deleted_at` |
+| `post_shares` | `post_share_id`、`social_post_id`、`shared_by_user_id`、`share_target_type`、`target_user_id`、`conversation_id`、`message_id`、`channel`、`payload_json`、`created_at` |
+| `user_post_views` | `user_post_view_id`、`user_id`、`social_post_id`、`first_viewed_at`、`last_viewed_at`、`first_view_source`、`last_view_source`、`view_count`、`total_dwell_time_ms`、`last_dwell_time_ms`、`created_at`、`updated_at` |
+| `user_post_hides` | `user_post_hide_id`、`user_id`、`social_post_id`、`status`、`source`、`reason`、`hidden_at`、`canceled_at`、`created_at`、`updated_at` |
+
+约束与索引：
+
+- `social_post_stats.social_post_id` 是主键并引用 `social_posts.social_post_id`
+- active 点赞 `(user_id, social_post_id, reaction_type)` 唯一，active 收藏 `(user_id, social_post_id)` 唯一
+- 评论和回复使用同一张 `post_comments` 表；回复通过 `parent_comment_id` 和 `root_comment_id` 关联
+- Post 分享写入 `post_shares`；分享到会话时可关联 `chat_conversations` 和生成的 `chat_messages`
+- `user_post_views UNIQUE (user_id, social_post_id)`，保证重复批量上报不会生成重复浏览记录
+- active 隐藏关系 `(user_id, social_post_id)` 唯一
+- 所有 `user_id` 引用 `users.user_id`，所有 `social_post_id` 引用 `social_posts.social_post_id`
+- `INDEX user_post_views(user_id, last_viewed_at DESC, social_post_id DESC)`
+- `INDEX user_post_hides(user_id, hidden_at DESC)`
+
+### 10. `user_follows`、`user_social_stats`、`user_blocks` 与 `user_privacy_settings` 社交关系表
+
+`user_follows` 保存单向关注事实。好友/球友关系不单独落库，由两个方向均为 `status = active` 的关注关系派生。`user_social_stats` 是可选计数缓存，第一版接口允许实时聚合。`user_blocks` 保存主动拉黑关系，拉黑后禁止关注、私信和群聊邀请，并从 feed 中过滤双方内容。`user_privacy_settings` 保存用户级基础隐私控制。
+
+| 表 | 关键字段 |
+| --- | --- |
+| `user_follows` | `follow_id`、`follower_user_id`、`following_user_id`、`status`、`source`、`followed_at`、`canceled_at`、`created_at`、`updated_at` |
+| `user_social_stats` | `user_id`、`follower_count`、`following_count`、`friend_count`、`updated_at` |
+| `user_blocks` | `user_block_id`、`blocker_user_id`、`blocked_user_id`、`reason`、`created_at`、`updated_at`、`deleted_at` |
+| `user_privacy_settings` | `user_id`、`direct_message_policy`、`allow_message_requests`、`default_post_visibility`、`show_profile_to_strangers`、`created_at`、`updated_at` |
+
+约束：
+
+- `follower_user_id <> following_user_id`
+- active 关注关系 `(follower_user_id, following_user_id)` 唯一
+- active 拉黑关系 `(blocker_user_id, blocked_user_id)` 唯一
+- 所有用户关系字段均引用 `users.user_id`
+
+### 11. `chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments` 与 `chat_message_requests` 消息表
+
+`chat_conversations` 表达私信或群聊，`chat_conversation_members` 表达用户在会话中的成员状态、已读游标和未读数量。私信通过排序后的双方用户 ID 生成 `direct_pair_key`，保证一对用户只有一个有效私信会话。`chat_messages` 是通用消息信封，不直接拥有业务对象。`message_type` 表达消息展示类型，`target_object_type/object_id` 和 `context_object_type/context_id` 引用现有业务对象；文件和媒体细节放在 `chat_message_attachments`。`chat_message_requests` 保存非好友或不满足私信策略时的陌生人消息请求。
+
+| 表 | 关键字段 |
+| --- | --- |
+| `chat_conversations` | `conversation_id`、`conversation_type`、`group_type`、`direct_pair_key`、`title`、`created_by_user_id`、`context_type`、`context_id`、`status`、`last_message_id`、`last_message_seq`、`last_message_preview`、`last_message_at` |
+| `chat_conversation_members` | `conversation_member_id`、`conversation_id`、`user_id`、`member_role`、`status`、`joined_at`、`left_at`、`last_read_message_id`、`last_read_message_seq`、`last_read_at`、`unread_count`、`muted_until`、`pinned_at`、`archived_at` |
+| `chat_messages` | `message_id`、`conversation_id`、`message_seq`、`sender_user_id`、`sender_type`、`message_type`、`text_content`、`payload_json`、`target_object_type`、`target_object_id`、`context_object_type`、`context_object_id`、`reply_to_message_id`、`client_message_id`、`status`、`sent_at` |
+| `chat_message_attachments` | `attachment_id`、`message_id`、`attachment_type`、`media_path`、`thumbnail_path`、`mime_type`、`file_size_bytes`、`duration_ms`、`width_px`、`height_px`、`object_type`、`object_id`、`payload_json`、`sort_order` |
+| `chat_message_requests` | `message_request_id`、`requester_user_id`、`recipient_user_id`、`conversation_id`、`status`、`request_message`、`source`、`requested_at`、`responded_at`、`created_at`、`updated_at` |
+
+`client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
+
+陌生人消息请求在 `status = pending` 时 `(requester_user_id, recipient_user_id)` 唯一。接受请求后创建或复用双方 direct conversation，并把 `conversation_id` 写回请求记录。
+
+### 12. `notification_events`、`user_notifications`、`user_inbox_counters` 与 `content_reports` 通知和治理表
+
+`notification_events` 保存一次业务事件，`user_notifications` 保存具体接收人的展示、已读和删除状态。通知对象通过多态对象字段引用 `social_posts`、`videos`、`tennis_activities`、`lessons` 等业务对象，不把业务逻辑写入通知表。
+
+| 表 | 关键字段 |
+| --- | --- |
+| `notification_events` | `notification_event_id`、`event_type`、`category`、`actor_user_id`、`object_type`、`object_id`、`context_type`、`context_id`、`title`、`body`、`deep_link`、`payload_json`、`dedup_key`、`aggregation_key`、`created_at` |
+| `user_notifications` | `user_notification_id`、`notification_event_id`、`recipient_user_id`、`status`、`priority`、`delivered_at`、`seen_at`、`read_at`、`dismissed_at`、`created_at`、`updated_at`、`deleted_at` |
+| `user_inbox_counters` | `user_id`、`unread_direct_message_count`、`unread_group_message_count`、`unread_notification_count`、`updated_at` |
+| `content_reports` | `content_report_id`、`reporter_user_id`、`target_type`、`target_id`、`reason_type`、`reason_text`、`source`、`status`、`reviewer_user_id`、`reviewed_at`、`resolution_note`、`created_at`、`updated_at` |
+
+同一个用户对同一个对象只能有一条 `pending` 或 `reviewing` 举报记录；处理完成后可再次提交新的举报事实。
+
+### 13. `points` 每分表
 
 一条记录代表视频中的一分。
 

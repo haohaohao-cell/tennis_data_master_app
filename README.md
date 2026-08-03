@@ -6,6 +6,7 @@ Project structure:
 backend/                 Backend API, database, users, task management
 cv/                      Video analysis, ball/player tracking, event recognition
 web/                     Web dashboard and admin console
+admin/                   Independent admin Web frontend
 app/                     React Native / Expo app
 shared/                  Shared schemas and constants
   api-schema/            API data structures

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+.claude/
 
 # Runtime video inputs and generated outputs
 cv/data/input/*
@@ -11,3 +12,20 @@ cv/data/output/*
 
 # Local model weights
 cv/models/weights/*.pt
+
+# Runtime logs and local databases
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Backend runtime uploads and generated media
+backend/storage/
+
+# Downloaded boundary datasets
+backend/data/area_city_ok_geo.csv
+backend/data/ok_geo.csv
+backend/data/ok_geo.csv.7z
