@@ -77,6 +77,11 @@ def main() -> None:
     args = parse_args()
     archive_path = Path(args.archive).resolve()
     target_path = Path(args.target).resolve()
+    if target_path.exists() and not args.force:
+        print(f"Target already exists: {target_path}")
+        restore_windows_acl_inheritance(target_path)
+        return
+
     download_archive(archive_path)
     extract_csv(archive_path, target_path, force=args.force)
 

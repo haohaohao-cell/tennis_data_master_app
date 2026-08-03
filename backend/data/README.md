@@ -6,6 +6,12 @@ Administrative-area lookup reads AreaCity boundary data from. If strict point-in
 backend/data/area_city_ok_geo.csv
 ```
 
+The default CSV is large and is not committed to Git. Download and extract it to the correct path with:
+
+```text
+conda run -n tennis python scripts/download_area_city_data.py
+```
+
 Override the path with:
 
 ```text
@@ -18,10 +24,10 @@ The default coordinate system is `gcj02`, matching AreaCity `ok_geo.csv` boundar
 TENNIS_AREA_CITY_COORDINATE_SYSTEM=wgs84
 ```
 
-Download and extract the default AreaCity data with:
+Run the script again with `--force` to overwrite the existing CSV:
 
 ```text
-conda run -n tennis python scripts/download_area_city_data.py
+conda run -n tennis python scripts/download_area_city_data.py --force
 ```
 
 
