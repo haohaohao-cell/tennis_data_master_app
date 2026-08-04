@@ -8,7 +8,7 @@ import { getUnreadCounts } from "@/api/messages";
 import { useAuth } from "@/auth/AuthProvider";
 import { colors, tabBarHeight } from "@/theme";
 
-function PublishTabButton() {
+function CreateTabButton() {
   const router = useRouter();
 
   return (
@@ -23,7 +23,7 @@ function PublishTabButton() {
       <View style={styles.publishCircle}>
         <Ionicons color={colors.inverse} name="add" size={30} />
       </View>
-      <Text style={styles.publishLabel}>发布</Text>
+      <Text style={styles.publishLabel}>创建</Text>
     </Pressable>
   );
 }
@@ -88,8 +88,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="publish"
         options={{
-          title: "发布",
-          tabBarButton: () => <PublishTabButton />,
+          title: "创建",
+          tabBarButton: () => <CreateTabButton />,
         }}
       />
       <Tabs.Screen

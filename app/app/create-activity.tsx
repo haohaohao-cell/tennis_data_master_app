@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -14,9 +15,11 @@ import {
 import { ApiError } from "@/api/client";
 import {
   createTennisActivity,
+  listUploadLessons,
   type ActivityType,
   type ActivityVisibility,
   type CourtSurface,
+  type LessonOption,
 } from "@/api/uploads";
 import {
   formatActivityLocation,
@@ -30,7 +33,7 @@ import { IconBadge, ScrollPage, TopBar, type IconName } from "@/components/ui";
 import { useActivityLocationCache } from "@/location/ActivityLocationProvider";
 import { colors, radius } from "@/theme";
 
-type ActivityRecordKind = "match" | "training";
+type ActivityRecordKind = "practice" | "match" | "lesson";
 
 const trainingTypeOptions: { icon: IconName; label: string; value: ActivityType }[] = [
   { icon: "tennisball-outline", label: "对打", value: "casual_hit" },
@@ -56,6 +59,12 @@ const visibilityOptions: { label: string; value: ActivityVisibility }[] = [
   { label: "公开", value: "public" },
 ];
 
+const lessonVisibilityOptions: { label: string; value: ActivityVisibility }[] = [
+  { label: "仅自己", value: "private" },
+  { label: "教练可见", value: "lesson_coach" },
+  { label: "全课可见", value: "lesson_participants" },
+];
+
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     return error.message;
@@ -71,15 +80,37 @@ function activityTypeLabel(value: ActivityType) {
   return match?.label ?? "训练";
 }
 
-function defaultTitle(kind: ActivityRecordKind, activityType: ActivityType) {
+function defaultTitle(
+  kind: ActivityRecordKind,
+  activityType: ActivityType,
+  lesson: LessonOption | null,
+) {
   if (kind === "match") {
     return "比赛记录";
   }
-  return `${activityTypeLabel(activityType)}训练`;
+  if (kind === "lesson") {
+    return lesson?.title ? `${lesson.title} 课程记录` : "课程记录";
+  }
+  return `${activityTypeLabel(activityType)}练习`;
 }
 
 function parseKind(value: string | string[] | undefined): ActivityRecordKind {
-  return value === "match" ? "match" : "training";
+  if (value === "match" || value === "lesson") {
+    return value;
+  }
+  return "practice";
+}
+
+function lessonLabel(lesson: LessonOption | null) {
+  if (!lesson) {
+    return "选择课程";
+  }
+  return lesson.title || `课程 ${lesson.lesson_id.slice(0, 8)}`;
+}
+
+function lessonMeta(lesson: LessonOption) {
+  const role = lesson.role === "coach" ? "教练" : "学员";
+  return [role, lesson.status, lesson.location_name].filter(Boolean).join(" · ");
 }
 
 export default function CreateActivityScreen() {
@@ -95,16 +126,27 @@ export default function CreateActivityScreen() {
   const [opponentName, setOpponentName] = useState("");
   const [courtSurface, setCourtSurface] = useState<CourtSurface | null>(null);
   const [note, setNote] = useState("");
-  const [visibility, setVisibility] = useState<ActivityVisibility>("private");
+  const [visibility, setVisibility] = useState<ActivityVisibility>(
+    kind === "lesson" ? "lesson_coach" : "private",
+  );
+  const [lessons, setLessons] = useState<LessonOption[]>([]);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
+  const [lessonPickerVisible, setLessonPickerVisible] = useState(false);
+  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const activityType = kind === "match" ? "match" : trainingType;
-  const screenTitle = kind === "match" ? "记录比赛" : "记录训练";
+  const selectedLesson = useMemo(
+    () => lessons.find((lesson) => lesson.lesson_id === selectedLessonId) ?? null,
+    [lessons, selectedLessonId],
+  );
+  const activityType = kind === "match" ? "match" : kind === "lesson" ? "lesson_practice" : trainingType;
+  const screenTitle = kind === "match" ? "记录比赛" : kind === "lesson" ? "记录课程" : "记录练习";
+  const activeVisibilityOptions = kind === "lesson" ? lessonVisibilityOptions : visibilityOptions;
   const titlePlaceholder = useMemo(
-    () => defaultTitle(kind, activityType),
-    [activityType, kind],
+    () => defaultTitle(kind, activityType, selectedLesson),
+    [activityType, kind, selectedLesson],
   );
 
   useEffect(() => {
@@ -112,6 +154,41 @@ export default function CreateActivityScreen() {
       setLocationResult(cachedLocationResult);
     }
   }, [cachedLocationResult]);
+
+  useEffect(() => {
+    if (kind !== "lesson" || !accessToken) {
+      return;
+    }
+
+    let mounted = true;
+    setLessonsLoading(true);
+    listUploadLessons(accessToken)
+      .then((response) => {
+        if (mounted) {
+          setLessons(response.items);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setLessons([]);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setLessonsLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [accessToken, kind]);
+
+  useEffect(() => {
+    if (kind === "lesson" && selectedLessonId && !lessons.some((lesson) => lesson.lesson_id === selectedLessonId)) {
+      setSelectedLessonId(null);
+    }
+  }, [kind, lessons, selectedLessonId]);
 
   async function refreshLocation() {
     if (saving || locating) {
@@ -132,6 +209,10 @@ export default function CreateActivityScreen() {
       setError("请先登录后再记录活动。");
       return;
     }
+    if (kind === "lesson" && !selectedLesson) {
+      setError("记录课程需要先选择一节课程。");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -142,6 +223,7 @@ export default function CreateActivityScreen() {
         activity_type: activityType,
         court_surface: courtSurface,
         default_visibility: visibility,
+        lesson_id: kind === "lesson" ? selectedLesson?.lesson_id ?? null : null,
         location: nextLocation.location,
         note: note.trim() || null,
         opponent_name: kind === "match" ? opponentName.trim() || null : null,
@@ -185,7 +267,7 @@ export default function CreateActivityScreen() {
         <View style={styles.statePanel}>
           <IconBadge name="log-in-outline" />
           <Text style={styles.emptyTitle}>登录后记录</Text>
-          <Text style={styles.mutedText}>比赛和训练记录需要归属到你的账户。</Text>
+          <Text style={styles.mutedText}>网球日记需要归属到你的账户。</Text>
           <Pressable
             accessibilityRole="button"
             onPress={() =>
@@ -204,32 +286,41 @@ export default function CreateActivityScreen() {
   }
 
   return (
-    <ScrollPage contentStyle={styles.page}>
-      <TopBar onBack={() => router.back()} subtitle="Tennis Activity" title={screenTitle} />
+    <>
+      <ScrollPage contentStyle={styles.page}>
+      <TopBar onBack={() => router.back()} subtitle="网球日记" title={screenTitle} />
 
       <View style={styles.contextPanel}>
         <View style={styles.contextIcon}>
           <Ionicons
             color={kind === "match" ? colors.clay : colors.accentDeep}
-            name={kind === "match" ? "trophy-outline" : "fitness-outline"}
+            name={
+              kind === "match"
+                ? "trophy-outline"
+                : kind === "lesson"
+                  ? "school-outline"
+                  : "fitness-outline"
+            }
             size={22}
           />
         </View>
         <View style={styles.contextText}>
           <Text style={styles.contextTitle}>
-            {kind === "match" ? "比赛 Activity" : "训练 Activity"}
+            {kind === "match" ? "比赛日记" : kind === "lesson" ? "课程日记" : "练习日记"}
           </Text>
           <Text style={styles.contextMeta}>
             {kind === "match"
               ? "保存一次比赛记录；不需要先上传视频。"
-              : "保存一次训练记录；视频和分析可以后续归入活动。"}
+              : kind === "lesson"
+                ? "记录你在某节课程里的练习、反馈和课后重点。"
+                : "保存一次练习记录；视频和分析可以后续归入日记。"}
           </Text>
         </View>
       </View>
 
-      {kind === "training" ? (
+      {kind === "practice" ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>训练类型</Text>
+          <Text style={styles.sectionTitle}>练习类型</Text>
           <View style={styles.optionGrid}>
             {trainingTypeOptions.map((option) => {
               const selected = trainingType === option.value;
@@ -252,6 +343,37 @@ export default function CreateActivityScreen() {
               );
             })}
           </View>
+        </View>
+      ) : null}
+
+      {kind === "lesson" ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>课程</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={saving || lessonsLoading}
+            onPress={() => setLessonPickerVisible(true)}
+            style={[styles.lessonSelectCard, (saving || lessonsLoading) && styles.disabledBlock]}
+          >
+            <View style={styles.locationIcon}>
+              {lessonsLoading ? (
+                <ActivityIndicator color={colors.accentDeep} size="small" />
+              ) : (
+                <Ionicons color={colors.accentDeep} name="school-outline" size={18} />
+              )}
+            </View>
+            <View style={styles.locationCopy}>
+              <Text style={styles.locationTitle}>
+                {lessonsLoading ? "正在加载课程" : lessonLabel(selectedLesson)}
+              </Text>
+              <Text style={styles.locationText}>
+                {selectedLesson
+                  ? lessonMeta(selectedLesson)
+                  : "课程记录需要绑定一节你参与的课程。"}
+              </Text>
+            </View>
+            <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+          </Pressable>
         </View>
       ) : null}
 
@@ -329,7 +451,13 @@ export default function CreateActivityScreen() {
             editable={!saving}
             multiline
             onChangeText={setNote}
-            placeholder={kind === "match" ? "比分、关键局或赛后感受" : "训练目标、完成情况或需要复盘的问题"}
+            placeholder={
+              kind === "match"
+                ? "比分、关键局或赛后感受"
+                : kind === "lesson"
+                  ? "本节重点、教练反馈、课后作业或下次目标"
+                  : "练习目标、完成情况或需要复盘的问题"
+            }
             placeholderTextColor={colors.muted}
             style={[styles.input, styles.textArea]}
             value={note}
@@ -362,7 +490,7 @@ export default function CreateActivityScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>可见范围</Text>
         <View style={styles.chipWrap}>
-          {visibilityOptions.map((option) => {
+          {activeVisibilityOptions.map((option) => {
             const selected = visibility === option.value;
             return (
               <Pressable
@@ -398,7 +526,78 @@ export default function CreateActivityScreen() {
           </>
         )}
       </Pressable>
-    </ScrollPage>
+      </ScrollPage>
+
+      <LessonPickerModal
+        onClose={() => setLessonPickerVisible(false)}
+        onSelect={(lessonId) => {
+          setSelectedLessonId(lessonId);
+          setLessonPickerVisible(false);
+          setError(null);
+        }}
+        options={lessons}
+        selectedLessonId={selectedLessonId}
+        visible={lessonPickerVisible}
+      />
+    </>
+  );
+}
+
+function LessonPickerModal({
+  onClose,
+  onSelect,
+  options,
+  selectedLessonId,
+  visible,
+}: {
+  onClose: () => void;
+  onSelect: (lessonId: string) => void;
+  options: LessonOption[];
+  selectedLessonId: string | null;
+  visible: boolean;
+}) {
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalRoot}>
+        <Pressable accessibilityLabel="关闭课程选择" onPress={onClose} style={styles.modalBackdrop} />
+        <View style={styles.lessonSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>选择课程</Text>
+            <Pressable accessibilityRole="button" onPress={onClose} style={styles.iconButton}>
+              <Ionicons color={colors.ink} name="close" size={18} />
+            </Pressable>
+          </View>
+
+          {options.length ? (
+            options.map((lesson) => {
+              const selected = lesson.lesson_id === selectedLessonId;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={lesson.lesson_id}
+                  onPress={() => onSelect(lesson.lesson_id)}
+                  style={styles.lessonRow}
+                >
+                  <IconBadge name={lesson.role === "coach" ? "school-outline" : "person-outline"} />
+                  <View style={styles.lessonText}>
+                    <Text numberOfLines={1} style={styles.lessonTitle}>
+                      {lesson.title || `课程 ${lesson.lesson_id.slice(0, 8)}`}
+                    </Text>
+                    <Text style={styles.lessonMeta}>{lessonMeta(lesson)}</Text>
+                  </View>
+                  {selected ? <Ionicons color={colors.accentDeep} name="checkmark" size={20} /> : null}
+                </Pressable>
+              );
+            })
+          ) : (
+            <View style={styles.emptyLessonPanel}>
+              <Text style={styles.emptyTitle}>暂无课程</Text>
+              <Text style={styles.mutedText}>当前账户没有可绑定的课程，暂时不能创建课程记录。</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -575,6 +774,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  lessonSelectCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 11,
+    minHeight: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   locationCopy: {
     flex: 1,
     gap: 3,
@@ -597,6 +808,77 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 14,
     fontWeight: "900",
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.28)",
+  },
+  lessonSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.control,
+    borderTopRightRadius: radius.control,
+    gap: 8,
+    maxHeight: "72%",
+    paddingBottom: 22,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  modalHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  modalTitle: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  iconButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.control,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  lessonRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 66,
+    paddingHorizontal: 12,
+  },
+  lessonText: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  lessonTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  lessonMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  emptyLessonPanel: {
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    padding: 16,
   },
   errorText: {
     color: "#B14A3D",

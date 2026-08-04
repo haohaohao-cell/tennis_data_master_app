@@ -256,13 +256,13 @@ App 启动时应尝试恢复本地登录状态，但不应在进入 App 时强�
 
 第一版移动端用于确认整体页面结构、真实数据接入方式和视觉方向。当前已接入开发期后端登录、用户身份、头像上传、真实视频上传、Activity 创建、Post 发布、首页 Feed、Post 详情、我的内容聚合、基础消息中心、用户主页、球友搜索、私信和教练身份申请；训练页部分概览、教练工作台、学员档案和 AI 数据仍保留演示或占位内容。视觉以暖白、石墨灰为基础，主点缀使用更淡的雾蓝灰，可少量使用浅金、浅红土等辅助色，不以绿色或高饱和颜色作为主色。
 
-普通球员模式包含五个底部入口：首页、训练、发布、消息、我的。发布入口以中间突出按钮呈现，点击后弹出创建菜单，包含上传视频、记录比赛、记录训练和发布动态四个真实入口。上传视频会创建一条带视频的 Tennis Activity，用于个人比赛/训练档案、课程视频归档和后续 AI 分析，不会自动发布到社区；记录比赛和记录训练会创建无视频或暂未绑定视频的 Tennis Activity，当前 App 只暴露“仅自己”和“公开”两个可见范围；发布动态进入真实 Post 发布流程，属于社区分享，不会自动创建 Tennis Activity。
+普通球员模式包含五个底部入口：首页、训练、创建、消息、我的。创建入口以中间突出加号呈现，点击后先显示两个一级选择：“发布动态”和“创建网球日记”。发布动态进入真实 Post 发布流程，属于社区分享，可以单独发布，也可以后续从某条 Tennis Activity 选择片段、数据卡片或总结发布；单独发布动态不会自动创建 Tennis Activity。创建网球日记进入二级选择，包含记录练习、记录比赛和记录课程三项，底层都创建 `tennis_activities`。记录练习和记录比赛可创建无视频或暂未绑定视频的个人 Activity，当前 App 只暴露“仅自己”和“公开”两个可见范围；记录课程必须绑定当前用户参与的课程，创建 `activity_type = lesson_practice` 的 Activity，可见范围包含“仅自己”“教练可见”和“全课可见”。
 
 首页用于网球社交 Post 内容流展示，顶部直接呈现推荐、关注、附近三个频道，不显示无信息价值的大标题或通知入口。首页不再使用本地模拟动态或模拟附近球友，统一调用 `GET /api/v1/posts/feed`。推荐频道允许未登录用户浏览公开且审核通过的 Post；已登录用户会额外过滤拉黑关系、主动隐藏，并把已浏览内容排到未浏览内容之后。关注频道只展示当前用户已关注作者的可见 Post，未登录时展示登录入口。附近频道只查询带公开粗粒度位置的 Post，App 端由用户选择城市或地区，不读取或展示精确坐标。Post 卡片点击媒体、标题或正文进入 Post 详情页，点击发布者头像进入发布者主页；点赞、评论和收藏按钮必须有明确反馈，评论按钮进入详情页评论区。
 
 首页内容流使用稳定游标分页，不使用传统页码分页。下拉刷新只重新请求新的内容，不清空服务端浏览记录；加载到底部时展示明确的无更多内容状态。前端不会在接口返回时立即标记已看，而是在 Post 进入可见区域后通过 `POST /api/v1/posts/views/bulk` 批量上报浏览记录。浏览上报属于非阻塞的轻量行为，临时失败时客户端可静默重试，不应触发启动诊断弹窗或影响用户进入首页。当前 App 首页不提供单条隐藏动态入口；既有隐藏数据只作为服务端过滤兼容，不在移动端第一版暴露。推荐排序采用“未浏览优先、已浏览后置”的发布时间倒序策略，后续可替换策略但保持接口稳定。
 
-训练页用于普通球员查看训练概览和进入创建流程。当前代码中，本周概览、图表和最近活动列表仍使用本地演示数据；比赛、训练和视频入口已分别接入真实的 `create-activity` 与 `upload-video` 流程；课程入口仍进入占位页。真实个人 Activity 列表当前以“我的”页面中的比赛、训练和课程 Tab 为准，后续训练页接入真实数据时应复用现有 `GET /api/v1/me/profile-content` 或新增活动列表接口。
+训练页用于普通球员查看训练概览和进入创建流程。当前代码中，本周概览、图表和最近活动列表仍使用本地演示数据；记录区提供练习、比赛和课程三个入口，均进入真实 `create-activity` 流程并按 `kind = practice | match | lesson` 展示差异化表单。真实个人 Activity 列表当前以“我的”页面中的比赛、训练和课程 Tab 为准，后续训练页接入真实数据时应复用现有 `GET /api/v1/me/profile-content` 或新增活动列表接口。
 
 消息页包含通知、聊天和请求三个视图，已登录用户统一从后端读取真实通知、私信会话、待处理消息请求和未读数；未登录用户展示登录入口。消息页右上角提供“添加球友”入口，进入球友搜索页后可按昵称或球友 ID 搜索用户，搜索结果进入用户主页完成关注或回关。聊天项进入真实单聊页，支持文本消息拉取、发送、发送中、发送失败重试、加载更早消息和进入会话后标记已读。短期内，聊天详情页在前台聚焦时使用轻量轮询刷新新消息；后续接入 WebSocket 或移动推送时，应保留 REST 拉取作为断线补偿。消息页不放设置入口，设置归属于我的页面。
 
@@ -302,15 +302,15 @@ Admin Web 不直接访问数据库，不包含独立后端。后台权限继续�
 
 ## 17. App 视频上传
 
-移动端“创建”菜单中的“上传视频”进入真实视频上传流程。一次上传会先创建一条 `tennis_activities` 记录，再在该 activity 下创建一组 `videos` 记录，随后逐个上传原始视频文件；视频不直接挂在 `lessons` 表上。第一版上传入口从手机相册选择视频；一次 Activity 上传当前最多选择 20 个视频，App 与后端 `UploadIntentCreate.videos` 都按该上限校验。拍摄入口待相机录制流程接入后再恢复。
+视频上传是 Tennis Activity 的素材能力，不作为创建加号菜单的一级入口展示。现有视频上传流程仍保留为 Activity 附件和后续分析能力：一次上传会先创建一条 `tennis_activities` 记录，再在该 activity 下创建一组 `videos` 记录，随后逐个上传原始视频文件；视频不直接挂在 `lessons` 表上。第一版上传入口从手机相册选择视频；一次 Activity 上传当前最多选择 20 个视频，App 与后端 `UploadIntentCreate.videos` 都按该上限校验。拍摄入口待相机录制流程接入后再恢复。
 
 上传视频本质上是在创建带视频的 Tennis Activity。归档方式分为个人活动、课程练习和教学示范。个人活动不关联课程，可选择 `casual_hit`、`match`、`serve_training`、`forehand_training`、`backhand_training`、`multi_ball_drill`、`stroke_recording`、`post_match_review` 或 `other`，默认 `default_visibility = private`。课程练习必须选择当前用户参与的课程，使用 `activity_type = lesson_practice`，默认可见性为 `lesson_coach`。教学示范仅通过教练身份审核的用户可用，使用 `activity_type = coach_demo`；如果关联课程，默认可见性为 `lesson_participants`，否则默认为 `private`。
 
-创建无视频 Activity 和上传视频创建 Activity 时，移动端不再要求用户手填地点。App 打开后启动前台位置缓存，优先从手机系统读取经纬度、定位精度和定位时间，并在前台每 3 分钟刷新一次；记录比赛/训练、附近动态等非视频元数据场景需要位置时，优先直接使用上一次缓存的经纬度，避免每个功能现场等待定位。上传视频或发布视频动态时，如果所选视频的相册资产包含拍摄经纬度，App 优先使用该拍摄位置并保存为 `location_source = video_metadata`；如果视频没有位置元数据，再使用前台位置缓存。拿到经纬度后调用 `POST /api/v1/locations/resolve` 由后端解析省、市、区。用户拒绝定位权限、系统定位服务未开启，或手机无法在合理时间内返回经纬度时，Activity 仍可保存，但 `location_source = unavailable`；不再使用网络/IP 粗略定位兜底。手机或视频已返回经纬度且后端边界数据可用时，后端必须返回精确命中或最近行政区近似结果；只有解析依赖、边界数据不可用或客户端请求超时时，App 才保留经纬度并允许省、市、区暂时为空。Activity 精确经纬度只作为活动私有数据返回给活动所有者和后台管理，不向其他用户公开；非所有者查看可见 Activity 时只返回城市、区等粗粒度位置。`location_name` 保留为旧数据兼容和粗粒度展示字段，后续球场识别通过已保存的精确位置匹配候选球场。
+创建无视频 Activity 和上传视频创建 Activity 时，移动端不再要求用户手填地点。App 打开后启动前台位置缓存，优先从手机系统读取经纬度、定位精度和定位时间，并在前台每 3 分钟刷新一次；记录练习、记录比赛、记录课程、附近动态等非视频元数据场景需要位置时，优先直接使用上一次缓存的经纬度，避免每个功能现场等待定位。上传视频或发布视频动态时，如果所选视频的相册资产包含拍摄经纬度，App 优先使用该拍摄位置并保存为 `location_source = video_metadata`；如果视频没有位置元数据，再使用前台位置缓存。拿到经纬度后调用 `POST /api/v1/locations/resolve` 由后端解析省、市、区。用户拒绝定位权限、系统定位服务未开启，或手机无法在合理时间内返回经纬度时，Activity 仍可保存，但 `location_source = unavailable`；不再使用网络/IP 粗略定位兜底。手机或视频已返回经纬度且后端边界数据可用时，后端必须返回精确命中或最近行政区近似结果；只有解析依赖、边界数据不可用或客户端请求超时时，App 才保留经纬度并允许省、市、区暂时为空。Activity 精确经纬度只作为活动私有数据返回给活动所有者和后台管理，不向其他用户公开；非所有者查看可见 Activity 时只返回城市、区等粗粒度位置。`location_name` 保留为旧数据兼容和粗粒度展示字段，后续球场识别通过已保存的精确位置匹配候选球场。
 
 行政区解析第一版不引入 PostGIS。后端通过 `TENNIS_AREA_CITY_BOUNDARY_PATH` 指向 AreaCity 三级行政区边界数据，默认路径为 `backend/data/area_city_ok_geo.csv`，支持 AreaCity 原始 `ok_geo.csv` 的 `polygon` 边界字段和 GeoJSON/JSON 边界文件；解析时使用 Python Shapely 和 STRtree 空间索引做点面匹配。App 采集坐标统一按 `wgs84` 提交；边界数据坐标系通过 `TENNIS_AREA_CITY_COORDINATE_SYSTEM` 配置，默认 `gcj02`，查询前由后端完成 WGS84/GCJ-02 转换。后端 API 启动时预热边界索引，避免手机首次解析承担大文件加载成本；App 仍设置有限超时，防止异常环境下长时间转圈。
 
-后端提供用户侧上传 API：`GET /api/v1/lessons/mine` 返回当前用户可绑定的课程；`POST /api/v1/tennis-activities` 创建无视频 Activity 记录，用于记录比赛或训练；`POST /api/v1/tennis-activities/upload-intents` 创建 activity 与待上传视频记录；`POST /api/v1/videos/{video_id}/file` 上传单个视频文件；`POST /api/v1/tennis-activities/{id}/complete-upload` 在全部视频上传完成后提交 activity 并把视频分析状态置为待处理；`POST /api/v1/tennis-activities/{id}/cancel-upload` 可取消尚未完成的上传草稿。
+后端提供用户侧上传 API：`GET /api/v1/lessons/mine` 返回当前用户可绑定的课程；`POST /api/v1/tennis-activities` 创建无视频 Activity 记录，用于记录练习、比赛或绑定课程后的课程练习；`POST /api/v1/tennis-activities/upload-intents` 创建 activity 与待上传视频记录；`POST /api/v1/videos/{video_id}/file` 上传单个视频文件；`POST /api/v1/tennis-activities/{id}/complete-upload` 在全部视频上传完成后提交 activity 并把视频分析状态置为待处理；`POST /api/v1/tennis-activities/{id}/cancel-upload` 可取消尚未完成的上传草稿。移动端上传大视频时必须区分文件传输、服务端保存/预览图生成、提交 Activity 和进入分析队列等阶段，避免进度到 100% 后只显示无说明的等待动画。
 
 视频文件上传状态使用 `videos.upload_status` 表达，取值为 `pending`、`uploading`、`uploaded`、`failed`、`canceled`。该状态只描述文件上传生命周期，不替代 `videos.analysis_status`。第一版支持常见视频文件后缀 `mp4`、`mov`、`m4v`、`webm`、`mkv`、`avi`，并兼容 iOS 录制 MOV 常见的 QuickTime MIME 类型。创建上传意图时客户端传入的 `file_size_bytes` 仅表示选中素材的本地报告大小，可用于展示和提前提示；上传完成后以后端实际接收到的字节数写回 `videos.file_size_bytes`，不应仅因二者不完全一致判定上传失败。上传完成后，文件保存到后端配置的本地视频存储目录，并通过 `/storage/videos/...` 暴露给本地开发预览；后端同时为所有已上传视频生成并保存 `videos.thumbnail_path`，Tennis Activity 视频、手机直传 Post 视频和 Post 引用的 Activity clip 都使用同一缩略图字段。后续接入云存储或断点续传时，应保持 activity/video 业务模型不变，仅替换文件存储和上传传输层。
 
@@ -320,7 +320,7 @@ Admin Web 不直接访问数据库，不包含独立后端。后台权限继续�
 
 “动态”显示当前用户发布或保存为草稿的 `social_posts`，按发布时间或创建时间倒序排列；每个动态卡片优先展示图片或首个视频缩略图，点击后进入 Post 详情页。若动态关联了 `source_tennis_activity_id`，Post 详情页再提供来源 activity 入口。发布动态入口位于中间创建菜单，不在“我的”页面内直接编辑发布。
 
-“比赛”显示 `tennis_activities.owner_user_id = 当前用户` 且 `activity_type = match` 的 activity，包括记录比赛创建的无视频记录和比赛录像上传创建的带视频记录。“训练”显示当前用户除比赛外的 activity，包括记录训练创建的无视频记录、日常视频上传、课程练习视频和教练教学示范视频；刚完成上传并进入 `analysis_status = queued` 的 activity 必须立即出现在训练列表中。每条 activity 展示标题、时间、地点、视频数量、上传状态和分析状态；无视频记录展示为“无视频”和“暂无分析”，不显示成上传失败。
+“比赛”显示 `tennis_activities.owner_user_id = 当前用户` 且 `activity_type = match` 的 activity，包括记录比赛创建的无视频记录和比赛录像上传创建的带视频记录。“训练”显示当前用户除比赛外的 activity，包括记录练习创建的无视频记录、日常视频上传、课程练习视频和教练教学示范视频；刚完成上传并进入 `analysis_status = queued` 的 activity 必须立即出现在训练列表中。每条 activity 展示标题、时间、地点、视频数量、上传状态和分析状态；无视频记录展示为“无视频”和“暂无分析”，不显示成上传失败。
 
 “课程”显示当前用户作为教练或学员参与的 `lessons`。课程条目展示用户在该课程中的角色、课程状态、时间、关联 activity 数和视频数。课程仍是教学组织对象，视频通过 `tennis_activities.lesson_id` 间接归入课程。
 
@@ -332,7 +332,7 @@ Admin Web 不直接访问数据库，不包含独立后端。后台权限继续�
 
 ## 19. Activity 详情页与视频播放
 
-移动端从上传完成提示、记录比赛/训练完成提示、Post 来源 Activity 入口、“我的”页面中的比赛/训练列表，以及后续训练页真实列表进入 `/activity/[id]` 时，应展示真实 `tennis_activities` 详情，不再使用本地假 activity。详情页第一屏以视频播放和活动识别为核心：顶部显示返回、标题和 activity 类型；主区域展示当前选中的已上传视频；下方展示时间、场地、视频数、上传状态、分析状态和当前用户是否可管理。
+移动端从上传完成提示、记录练习/比赛/课程完成提示、Post 来源 Activity 入口、“我的”页面中的比赛/训练列表，以及后续训练页真实列表进入 `/activity/[id]` 时，应展示真实 `tennis_activities` 详情，不再使用本地假 activity。详情页第一屏以视频播放和活动识别为核心：顶部显示返回、标题和 activity 类型；主区域展示当前选中的已上传视频；下方展示时间、场地、视频数、上传状态、分析状态和当前用户是否可管理。
 
 详情页通过 `GET /api/v1/tennis-activities/{id}` 获取数据。后端返回 activity、当前用户可见的视频列表、可选 lesson 上下文、权限和聚合状态。App 端只播放后端返回且 `upload_status = uploaded` 的视频；待上传、上传失败、取消或无可播放文件时展示明确空状态，不进入播放器。
 

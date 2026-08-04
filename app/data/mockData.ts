@@ -109,37 +109,9 @@ export const nearbyPlayers = [
 ];
 
 export const trainingEntries = [
+  { label: "练习", icon: "fitness-outline" },
   { label: "比赛", icon: "trophy-outline" },
-  { label: "训练", icon: "fitness-outline" },
   { label: "课程", icon: "school-outline" },
-  { label: "视频", icon: "videocam-outline" },
-] as const;
-
-export const createActions = [
-  {
-    kind: "publish_post",
-    label: "发布动态",
-    icon: "create-outline",
-    subtitle: "发布到社区 Post，不创建 Activity",
-  },
-  {
-    kind: "upload_video",
-    label: "上传视频",
-    icon: "cloud-upload-outline",
-    subtitle: "保存为带视频的 Tennis Activity",
-  },
-  {
-    kind: "record_match",
-    label: "记录比赛",
-    icon: "trophy-outline",
-    subtitle: "无视频也能保存比赛 Activity",
-  },
-  {
-    kind: "record_training",
-    label: "记录训练",
-    icon: "barbell-outline",
-    subtitle: "无视频也能保存训练 Activity",
-  },
 ] as const;
 
 export const notifications = [

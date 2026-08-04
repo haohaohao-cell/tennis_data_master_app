@@ -1,35 +1,50 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useRequireAuth } from "@/auth/useRequireAuth";
-import { createActions } from "@/data/mockData";
 import { colors, radius } from "@/theme";
 
-type CreateAction = (typeof createActions)[number];
+const journalActions = [
+  {
+    icon: "fitness-outline",
+    kind: "practice",
+    label: "记录练习",
+    subtitle: "保存一次练习日记，可后续补充视频和分析",
+  },
+  {
+    icon: "trophy-outline",
+    kind: "match",
+    label: "记录比赛",
+    subtitle: "保存比赛过程、对手和赛后复盘",
+  },
+  {
+    icon: "school-outline",
+    kind: "lesson",
+    label: "记录课程",
+    subtitle: "绑定课程后记录课堂重点、反馈和作业",
+  },
+] as const;
+
+type JournalAction = (typeof journalActions)[number];
+type CreateStep = "root" | "journal";
 
 export default function CreateMenuScreen() {
   const router = useRouter();
   const requireAuth = useRequireAuth();
+  const [step, setStep] = useState<CreateStep>("root");
 
-  function handleAction(item: CreateAction) {
-    if (item.kind === "upload_video") {
-      if (!requireAuth("上传视频需要登录后继续", "/upload-video")) {
-        return;
-      }
-      router.replace("/upload-video");
+  function handlePublishPost() {
+    if (!requireAuth("发布动态需要登录后继续", "/create-post")) {
       return;
     }
-    if (item.kind === "publish_post") {
-      if (!requireAuth("发布动态需要登录后继续", "/create-post")) {
-        return;
-      }
-      router.replace("/create-post");
-      return;
-    }
+    router.replace("/create-post");
+  }
 
-    const kind = item.kind === "record_match" ? "match" : "training";
+  function handleJournalAction(item: JournalAction) {
+    const kind = item.kind;
     const redirect = `/create-activity?kind=${kind}`;
     if (!requireAuth(`${item.label}需要登录后继续`, redirect)) {
       return;
@@ -47,9 +62,23 @@ export default function CreateMenuScreen() {
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <View>
-              <Text style={styles.sheetTitle}>创建</Text>
-              <Text style={styles.sheetSubtitle}>Activity 归档和 Post 发布分开处理</Text>
+            <View style={styles.sheetTitleGroup}>
+              <View style={styles.sheetTitleRow}>
+                {step === "journal" ? (
+                  <Pressable
+                    accessibilityLabel="返回创建选项"
+                    accessibilityRole="button"
+                    onPress={() => setStep("root")}
+                    style={styles.backButton}
+                  >
+                    <Ionicons color={colors.ink} name="chevron-back" size={20} />
+                  </Pressable>
+                ) : null}
+                <Text style={styles.sheetTitle}>{step === "journal" ? "创建网球日记" : "创建"}</Text>
+              </View>
+              <Text style={styles.sheetSubtitle}>
+                {step === "journal" ? "先选择这次记录的类型" : "发布动态，或记录一次网球活动"}
+              </Text>
             </View>
             <Pressable accessibilityLabel="关闭" accessibilityRole="button" onPress={() => router.back()} style={styles.closeButton}>
               <Ionicons color={colors.ink} name="close" size={20} />
@@ -57,26 +86,65 @@ export default function CreateMenuScreen() {
           </View>
 
           <View style={styles.actionList}>
-            {createActions.map((item) => (
-              <Pressable
-                accessibilityLabel={`${item.label}，${item.subtitle}`}
-                accessibilityRole="button"
-                key={item.label}
-                onPress={() => handleAction(item)}
-                style={styles.actionRow}
-              >
-                <View style={styles.actionIcon}>
-                  <Ionicons color={colors.ink} name={item.icon} size={22} />
-                </View>
-                <View style={styles.actionCopy}>
-                  <Text style={styles.actionLabel}>{item.label}</Text>
-                  <Text numberOfLines={1} style={styles.actionSubtitle}>
-                    {item.subtitle}
-                  </Text>
-                </View>
-                <Ionicons color={colors.muted} name="chevron-forward" size={18} />
-              </Pressable>
-            ))}
+            {step === "root" ? (
+              <>
+                <Pressable
+                  accessibilityLabel="发布动态，发布到社区"
+                  accessibilityRole="button"
+                  onPress={handlePublishPost}
+                  style={styles.actionRow}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons color={colors.ink} name="create-outline" size={22} />
+                  </View>
+                  <View style={styles.actionCopy}>
+                    <Text style={styles.actionLabel}>发布动态</Text>
+                    <Text numberOfLines={1} style={styles.actionSubtitle}>
+                      发到社区，可单独发布，也可之后从日记分享
+                    </Text>
+                  </View>
+                  <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="创建网球日记"
+                  accessibilityRole="button"
+                  onPress={() => setStep("journal")}
+                  style={styles.actionRow}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons color={colors.ink} name="journal-outline" size={22} />
+                  </View>
+                  <View style={styles.actionCopy}>
+                    <Text style={styles.actionLabel}>创建网球日记</Text>
+                    <Text numberOfLines={1} style={styles.actionSubtitle}>
+                      记录练习、比赛或课程，归入个人 Activity 档案
+                    </Text>
+                  </View>
+                  <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+                </Pressable>
+              </>
+            ) : (
+              journalActions.map((item) => (
+                <Pressable
+                  accessibilityLabel={`${item.label}，${item.subtitle}`}
+                  accessibilityRole="button"
+                  key={item.kind}
+                  onPress={() => handleJournalAction(item)}
+                  style={styles.actionRow}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons color={colors.ink} name={item.icon} size={22} />
+                  </View>
+                  <View style={styles.actionCopy}>
+                    <Text style={styles.actionLabel}>{item.label}</Text>
+                    <Text numberOfLines={1} style={styles.actionSubtitle}>
+                      {item.subtitle}
+                    </Text>
+                  </View>
+                  <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+                </Pressable>
+              ))
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -118,6 +186,16 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 12,
   },
+  sheetTitleGroup: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  sheetTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
   sheetTitle: {
     color: colors.ink,
     fontSize: 24,
@@ -136,6 +214,14 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: "center",
     width: 36,
+  },
+  backButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.control,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
   },
   actionList: {
     gap: 8,

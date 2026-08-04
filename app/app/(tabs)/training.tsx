@@ -25,7 +25,7 @@ const chartColors = [
   colors.accentDeep,
 ];
 
-const entryTones = ["sky", "gold", "accent", "clay"] as const;
+const entryTones = ["sky", "clay", "accent"] as const;
 
 export default function TrainingScreen() {
   const router = useRouter();
@@ -78,18 +78,11 @@ export default function TrainingScreen() {
                   router.push({ pathname: "/create-activity", params: { kind: "match" } });
                   return;
                 }
-                if (entry.label === "训练") {
-                  router.push({ pathname: "/create-activity", params: { kind: "training" } });
+                if (entry.label === "练习") {
+                  router.push({ pathname: "/create-activity", params: { kind: "practice" } });
                   return;
                 }
-                if (entry.label === "视频") {
-                  router.push("/upload-video");
-                  return;
-                }
-                router.push({
-                  pathname: "/create-placeholder",
-                  params: { type: `记录${entry.label}` },
-                });
+                router.push({ pathname: "/create-activity", params: { kind: "lesson" } });
               }}
               style={styles.entry}
             >
