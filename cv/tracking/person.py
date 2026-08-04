@@ -1,15 +1,17 @@
 # modules/person_tracker.py
 import cv2
 import numpy as np
-import torch
 from deep_sort_realtime.deepsort_tracker import DeepSort
+from time import perf_counter
 
+from cv.device import get_torch_device
 from .player_identity import PlayerIdentityManager
 
 
 class PersonTrackerManager:
     def __init__(self, detection_model):
         self.detection_model = detection_model
+        use_cuda = get_torch_device().type == "cuda"
 
         # 初始化 DeepSort 追踪器 (完全复刻你提供的参数)
         self.tracker = DeepSort(
@@ -21,21 +23,35 @@ class PersonTrackerManager:
             gating_only_position=False,
             override_track_class=None,
             embedder="mobilenet",
-            half=torch.cuda.is_available(),
+            half=use_cuda,
             bgr=True,
-            embedder_gpu=torch.cuda.is_available(),
+            embedder_gpu=use_cuda,
             polygon=False,
             today=None,
         )
         self.identity_manager = PlayerIdentityManager()
+        self.timing_seconds = {
+            "court_masks": 0.0,
+            "yolo_detection": 0.0,
+            "candidate_classification": 0.0,
+            "deep_sort_tracking": 0.0,
+            "identity_assignment": 0.0,
+        }
+
+    def _record_timing(self, stage, started_at):
+        self.timing_seconds[stage] += perf_counter() - started_at
 
     def update(self, frame, court_detector, frame_idx=0):
         """核心流转方法：供 main.py 每帧调用"""
         # 1. 收集并在逻辑上对人员进行分类判定
         detections = self._collect_person_detections(frame, court_detector)
         # 2. 将附带了身份标签(role)的数据送入 DeepSort 进行 ID 更新
+        started_at = perf_counter()
         tracks = self.tracker.update_tracks(detections, frame=frame)
+        self._record_timing("deep_sort_tracking", started_at)
+        started_at = perf_counter()
         tracks = self.identity_manager.update(tracks, frame, frame_idx)
+        self._record_timing("identity_assignment", started_at)
         return tracks
 
     # ==========================================
@@ -181,11 +197,17 @@ class PersonTrackerManager:
 
     def _collect_person_detections(self, frame, court_detector):
         detections = []
+        started_at = perf_counter()
         masks = self._court_masks(court_detector, frame.shape)
         bounds = self._court_bounds(masks[3]) if masks is not None else None
+        self._record_timing("court_masks", started_at)
 
         # 调用底层检测模型 (你提供的 DetectionModel)
+        started_at = perf_counter()
         person_boxes, probs = self.detection_model._detect(frame, person_min_score=0.5)
+        self._record_timing("yolo_detection", started_at)
+
+        started_at = perf_counter()
 
         top_candidates = []
         bottom_candidates = []
@@ -239,4 +261,5 @@ class PersonTrackerManager:
                     confidence = max(confidence, 0.7)
                 detections.append((ltwh, confidence, role))
 
+        self._record_timing("candidate_classification", started_at)
         return detections

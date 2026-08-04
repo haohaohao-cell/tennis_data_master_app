@@ -5,6 +5,7 @@ import torch.optim as optim
 import os
 from tensorboardX import SummaryWriter
 from .general import train, validate
+from cv.device import get_torch_device
 import argparse
 
 if __name__ == '__main__':
@@ -17,6 +18,9 @@ if __name__ == '__main__':
     parser.add_argument('--val_intervals', type=int, default=5, help='number of epochs to run validation')
     parser.add_argument('--steps_per_epoch', type=int, default=200, help='number of steps per one epoch')
     args = parser.parse_args()
+
+    device = get_torch_device()
+    pin_memory = device.type == 'cuda'
     
     train_dataset = trackNetDataset('train')
     train_loader = torch.utils.data.DataLoader(
@@ -24,7 +28,7 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=1,
-        pin_memory=True
+        pin_memory=pin_memory
     )
     
     val_dataset = trackNetDataset('val')
@@ -33,11 +37,10 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=1,
-        pin_memory=True
+        pin_memory=pin_memory
     )    
     
     model = BallTrackerNet()
-    device = 'cuda'
     model = model.to(device)
     
     exps_path = './exps/{}'.format(args.exp_id)

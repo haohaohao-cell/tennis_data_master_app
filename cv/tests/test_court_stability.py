@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from cv.court.stability import select_stable_court_matrix
+from cv.court.stability import sample_frame_indices, select_stable_court_matrix
 
 
 def translated_homography(x: float, y: float) -> np.ndarray:
@@ -10,6 +10,10 @@ def translated_homography(x: float, y: float) -> np.ndarray:
 
 
 class CourtStabilityTest(unittest.TestCase):
+    def test_sample_frame_indices_cover_the_video_span(self) -> None:
+        self.assertEqual(sample_frame_indices(100, 5), [0, 25, 50, 74, 99])
+        self.assertEqual(sample_frame_indices(3, 15), [0, 1, 2])
+
     def test_selects_medoid_from_largest_stable_group(self) -> None:
         candidates = [
             (0, translated_homography(0, 0)),

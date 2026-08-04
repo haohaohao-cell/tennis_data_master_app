@@ -10,7 +10,7 @@ from .trajectory import interpolation, remove_outliers_improved, split_track_imp
 
 
 class BallTrackerManager:
-    def __init__(self, model_path, device='cuda'):
+    def __init__(self, model_path, device=None):
         self.runner = TrackNetRunner(model_path=model_path, device=device)
         # 【新增】：为流式单帧处理准备一个专属的 3 帧缓存队列
         self.stream_buffer = deque(maxlen=3)

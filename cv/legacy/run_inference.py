@@ -12,6 +12,7 @@ from cv.analytics.player_distance import calculate_player_distances
 from cv.analytics.rally import _build_rally_analysis
 from cv.analytics.shot_speed import calculate_shot_speeds_true_meters
 from cv.config import CV_ROOT, INPUT_DIR, OUTPUT_DIR, WEIGHTS_DIR
+from cv.device import get_torch_device
 from cv.court import CourtReference
 from cv.court.keypoints import get_matrix_from_model
 from cv.events.hit_detection import standalone_get_ball_shot_frames
@@ -112,7 +113,7 @@ def main():
     if output_dir_path and not os.path.exists(output_dir_path):
         os.makedirs(output_dir_path)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = get_torch_device()
     print(f"[*] 使用计算设备: {device}")
     print(f"[*] 输入视频: {args.input_video_path}")
     print(f"[*] 输出视频: {args.output_video_path}")
@@ -142,7 +143,7 @@ def main():
 
     # 2. 初始化神经网络模型
     court_model = BallTrackerNet(out_channels=15).to(device)
-    court_model.load_state_dict(torch.load(args.court_model_path, map_location=device,weights_only=True))
+    court_model.load_state_dict(torch.load(args.court_model_path, map_location="cpu", weights_only=True))
     court_model.eval()
 
     ball_tracker = BallTrackerManager(model_path=args.ball_model_path, device=device)

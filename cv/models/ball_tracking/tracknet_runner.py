@@ -6,17 +6,18 @@ from scipy.spatial import distance
 from tqdm import tqdm
 from .model import BallTrackerNet
 from .general import postprocess
+from cv.device import resolve_torch_device
 
 
 class TrackNetRunner:
-    def __init__(self, model_path, device='cuda'):
+    def __init__(self, model_path, device=None):
         """
         初始化 TrackNet 模型，只需加载一次
         """
-        self.device = device
+        self.device = resolve_torch_device(device)
         self.model = BallTrackerNet()
-        self.model.load_state_dict(torch.load(model_path, map_location=device,weights_only=True))
-        self.model = self.model.to(device)
+        self.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+        self.model = self.model.to(self.device)
         self.model.eval()
 
     # ----------------------

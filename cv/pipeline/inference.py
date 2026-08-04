@@ -1,7 +1,7 @@
 """End-to-end tennis analysis pipeline v2.
 
-This version keeps the original model stack from `run_inference.py`, but
-changes the orchestration:
+This version uses GridTrackNet for ball coordinates and keeps the existing
+court/player/event orchestration:
 1. Run frame-level detection / tracking / event inference.
 2. Build an in-memory `match_frames` style payload.
 3. Segment points with the custom heuristic from `split_video_by_point.py`.
@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import deque
+import logging
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable
 
 import cv2
@@ -39,19 +40,22 @@ from cv.builders.match import (
 )
 from cv.builders.shots import slugify_upload_id
 from cv.config import (
-    DEFAULT_BALL_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_COURT_MODEL_PATH as COURT_MODEL_PATH,
+    DEFAULT_GRIDTRACKNET_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_PLAYER_MODEL_PATH as PLAYER_MODEL_PATH,
 )
-from cv.court.keypoints import get_matrix_from_model
+from cv.device import get_torch_device
+from cv.court.keypoints import get_matrix_from_model_with_ransac, project_reference_keypoints
 from cv.court.reference import CourtReference
+from cv.court.stability import estimate_stable_court_matrix
 from cv.events.hit_detection import standalone_get_ball_shot_frames
 from cv.events.in_out import evaluate_bounces_in_out
-from cv.events.net_hit.detector import NetHitConfig, detect_net_hits, make_horizontal_net_line
+from cv.events.net_hit.curved_detector import CurvedNetHitConfig, detect_curved_net_hits
+from cv.events.net_hit.curved_geometry import NetBandConfig, fit_net_band_from_samples
+from cv.events.net_hit.track_io import load_track_from_json
 from cv.events.shot_classifier import ShotClassifier
 from cv.models.court_detection import BallTrackerNet
 from cv.segmentation.points import SegmentationConfig
-from cv.tracking.ball import BallTrackerManager
 from cv.tracking.bounce import BounceDetectorManager
 from cv.tracking.person import PersonTrackerManager
 
@@ -61,6 +65,18 @@ DEFAULT_PLAYER_MODEL_PATH = str(PLAYER_MODEL_PATH)
 DEFAULT_COURT_MODEL_PATH = str(COURT_MODEL_PATH)
 MIN_VISIBLE_COURT_KEYPOINTS = 9
 CONSECUTIVE_NO_COURT_END_FRAMES = 10
+COURT_STABILITY_SAMPLE_COUNT = 15
+COURT_STABILITY_MAX_DEVIATION_PX = 30.0
+COURT_STABILITY_MIN_CONSENSUS_SIZE = 5
+NET_CALIBRATION_STRIDE = 20
+NET_MAX_CALIBRATION_FRAMES = 30
+LOGGER = logging.getLogger(__name__)
+
+
+def log_stage_duration(stage: str, started_at: float) -> None:
+    """Write a stable, machine-searchable duration line for pipeline profiling."""
+
+    LOGGER.info("pipeline_timing stage=%s elapsed_sec=%.3f", stage, perf_counter() - started_at)
 
 
 class YoloDetectionWrapper:
@@ -101,6 +117,7 @@ def run_inference_v2(
     ball_model_path: str = DEFAULT_BALL_MODEL_PATH,
     player_model_path: str = DEFAULT_PLAYER_MODEL_PATH,
     court_model_path: str = DEFAULT_COURT_MODEL_PATH,
+    ball_track_json: str | Path | None = None,
     upload_id: str | None = None,
     output_dir: str | Path | None = None,
     segmentation_config: SegmentationConfig | None = None,
@@ -114,7 +131,8 @@ def run_inference_v2(
     `points` database tables by the backend layer.
     """
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pipeline_started_at = perf_counter()
+    device = get_torch_device()
     input_video_path = str(input_video_path)
     effective_upload_id = upload_id or slugify_upload_id(Path(input_video_path).name)
     output_dir_path = Path(output_dir) if output_dir is not None else Path(input_video_path).resolve().parent
@@ -135,13 +153,104 @@ def run_inference_v2(
     court_ref_instance.build_court_reference()
     dummy_court = DummyCourtDetector(court_ref_instance)
 
+    stage_started_at = perf_counter()
     court_model = BallTrackerNet(out_channels=15).to(device)
-    court_model.load_state_dict(torch.load(court_model_path, map_location=device, weights_only=True))
+    court_model.load_state_dict(torch.load(court_model_path, map_location="cpu", weights_only=True))
     court_model.eval()
+    log_stage_duration("court_model_load", stage_started_at)
 
-    ball_tracker = BallTrackerManager(model_path=ball_model_path, device=device)
+    def detect_court_matrix(frame: np.ndarray) -> np.ndarray | None:
+        matrix, _ = get_matrix_from_model_with_ransac(frame, court_model, device, court_ref_instance)
+        return matrix
+
+    stage_started_at = perf_counter()
+    if progress_callback is not None:
+        progress_callback("court_stability", 0, COURT_STABILITY_SAMPLE_COUNT, "正在建立稳定球场坐标系")
+    stable_court = estimate_stable_court_matrix(
+        cap,
+        detect_court_matrix,
+        total_frames=total_frames,
+        sample_count=COURT_STABILITY_SAMPLE_COUNT,
+        court_ref=court_ref_instance,
+        max_deviation_px=COURT_STABILITY_MAX_DEVIATION_PX,
+        min_consensus_size=COURT_STABILITY_MIN_CONSENSUS_SIZE,
+    )
+    stable_court_matrix = stable_court.matrix
+    stable_court_points = project_reference_keypoints(stable_court_matrix, court_ref_instance)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    log_stage_duration("court_stability", stage_started_at)
+    if progress_callback is not None:
+        progress_callback(
+            "court_stability",
+            COURT_STABILITY_SAMPLE_COUNT,
+            COURT_STABILITY_SAMPLE_COUNT,
+            "稳定球场坐标系已建立",
+        )
+
+    stage_started_at = perf_counter()
+    if ball_track_json is not None:
+        grid_ball_coords, track_fps, track_frame_width = load_track_from_json(str(ball_track_json))
+        if len(grid_ball_coords) != total_frames:
+            raise ValueError(
+                "External ball track must have one entry for every video frame: "
+                f"expected {total_frames}, got {len(grid_ball_coords)}"
+            )
+        if track_fps is not None and abs(float(track_fps) - fps) > 0.02:
+            raise ValueError(
+                f"External ball-track fps ({track_fps}) does not match video fps ({fps})"
+            )
+        if track_frame_width is not None and int(track_frame_width) != frame_width:
+            raise ValueError(
+                "External ball-track frame width does not match the input video"
+            )
+        if progress_callback is not None:
+            progress_callback("ball_tracking", total_frames, total_frames, "已读取外部球轨迹")
+    else:
+        ball_model_file = Path(ball_model_path)
+        if not ball_model_file.exists():
+            raise FileNotFoundError(
+                "GridTrackNet H5 model not found. Set --ball_model_path or GRIDTRACKNET_MODEL_PATH. "
+                f"Current value: {ball_model_file}"
+            )
+        try:
+            from cv.models.ball_tracking.gridtracknet import (
+                GridTrackNet,
+                extract_gridtracknet_coords,
+                load_gridtracknet_h5,
+            )
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("GridTrackNet production inference requires TensorFlow.") from exc
+
+        gridtracknet_model = GridTrackNet()
+        load_gridtracknet_h5(gridtracknet_model, ball_model_file)
+
+        def report_gridtracknet_progress(current: int, total: int) -> None:
+            if progress_callback is not None:
+                progress_callback("ball_tracking", current, total, "正在运行 GridTrackNet 球坐标推理")
+
+        if progress_callback is not None:
+            progress_callback("ball_tracking", 0, total_frames, "正在运行 GridTrackNet 球坐标推理")
+        grid_ball_records, _ = extract_gridtracknet_coords(
+            input_video_path,
+            gridtracknet_model,
+            confidence_threshold=0.5,
+            progress_callback=report_gridtracknet_progress if progress_callback is not None else None,
+        )
+        if len(grid_ball_records) != total_frames:
+            raise RuntimeError(
+                "GridTrackNet returned coordinates for an unexpected number of frames: "
+                f"expected {total_frames}, got {len(grid_ball_records)}"
+            )
+        grid_ball_coords = [
+            tuple(record["pixel"]) if record.get("pixel") is not None else None
+            for record in grid_ball_records
+        ]
+    log_stage_duration("ball_tracking", stage_started_at)
+
+    stage_started_at = perf_counter()
     yolo_detector = YoloDetectionWrapper(model_path=player_model_path, device=device)
     person_tracker = PersonTrackerManager(detection_model=yolo_detector)
+    log_stage_duration("person_tracker_init", stage_started_at)
 
     court_points_all: list[Any] = []
     court_matrices_all: list[np.ndarray | None] = []
@@ -149,13 +258,16 @@ def run_inference_v2(
     player_detections_court: dict[int, dict[int, list[float] | None]] = {}
     ball_detections_court: dict[int, list[float] | None] = {}
     raw_coords: list[Any] = []
+    net_calibration_frames: list[np.ndarray] = []
+    net_calibration_matrices: list[np.ndarray] = []
+    net_calibration_keypoints: list[Any] = []
 
-    tracknet_buffer: deque[np.ndarray] = deque(maxlen=3)
     frame_idx = 0
-    last_good_matrix = np.eye(3)
+    last_good_matrix = stable_court_matrix
     track_id_to_player_id: dict[int, int] = {}
     progress_update_interval = max(1, total_frames // 200)
 
+    stage_started_at = perf_counter()
     progress = tqdm(total=total_frames, desc="run_inference_v2 pass1")
     if progress_callback is not None:
         progress_callback("pass1", 0, total_frames, "正在读取视频帧")
@@ -164,12 +276,16 @@ def run_inference_v2(
         if not ret:
             break
 
-        matrix, points = get_matrix_from_model(frame, court_model, device)
-        court_points_all.append(points)
-        court_matrices_all.append(matrix)
+        if (
+            frame_idx % NET_CALIBRATION_STRIDE == 0
+            and len(net_calibration_frames) < NET_MAX_CALIBRATION_FRAMES
+        ):
+            net_calibration_frames.append(frame.copy())
+            net_calibration_matrices.append(stable_court_matrix)
+            net_calibration_keypoints.append(stable_court_points)
 
-        if matrix is not None:
-            last_good_matrix = matrix
+        court_points_all.append(stable_court_points)
+        court_matrices_all.append(stable_court_matrix)
         dummy_court.court_warp_matrix.append(last_good_matrix)
 
         tracks = person_tracker.update(frame, dummy_court)
@@ -215,12 +331,7 @@ def run_inference_v2(
                 player_court_dict[player_id] = None
         player_detections_court[frame_idx] = player_court_dict
 
-        tracknet_buffer.append(frame.copy())
-        ball_xy = None
-        if len(tracknet_buffer) == 3:
-            ball_xy = ball_tracker.runner.infer_model_3_frames(
-                tracknet_buffer[0], tracknet_buffer[1], tracknet_buffer[2]
-            )
+        ball_xy = grid_ball_coords[frame_idx]
         raw_coords.append(ball_xy)
 
         if ball_xy is not None:
@@ -243,10 +354,16 @@ def run_inference_v2(
 
     cap.release()
     progress.close()
+    log_stage_duration("frame_analysis", stage_started_at)
+    for stage, elapsed_sec in person_tracker.timing_seconds.items():
+        LOGGER.info("pipeline_timing stage=person_%s elapsed_sec=%.3f", stage, elapsed_sec)
     if progress_callback is not None:
         progress_callback("postprocess", 0, 4, "正在后处理轨迹")
 
-    final_coords = ball_tracker.process_trajectory(raw_coords, enable_smoothing=False)
+    stage_started_at = perf_counter()
+    # GridTrackNet coordinates are the production source of truth. Do not let
+    # legacy trajectory cleanup remove real hit or bounce discontinuities.
+    final_coords = list(raw_coords)
     bounce_detector = BounceDetectorManager(score_thresh=15.0)
     raw_bounces, _, _ = bounce_detector.detect(final_coords)
     enhanced_bounces = bounce_detector.enhance_subpixel(final_coords, raw_bounces)
@@ -315,25 +432,26 @@ def run_inference_v2(
             for player_id, bbox in player_frame.items()
             if bbox is not None
         }
+    log_stage_duration("event_preprocessing", stage_started_at)
 
-    median_net_y = None
-    if court_lines_pixel_y:
-        net_ys = [item["net_y"] for item in court_lines_pixel_y.values() if "net_y" in item]
-        if net_ys:
-            median_net_y = int(np.median(net_ys))
-
-    net_hit_events: list[Any] = []
-    if median_net_y is not None:
-        net_config = NetHitConfig(
-            net_line=make_horizontal_net_line(median_net_y, frame_width),
-            fps=fps,
-            near_net_px=35.0,
-            min_confidence=0.55,
-        )
-        net_hit_events = detect_net_hits(final_coords, net_config)
+    stage_started_at = perf_counter()
+    net_model = fit_net_band_from_samples(
+        net_calibration_frames,
+        net_calibration_matrices,
+        (frame_width, frame_height),
+        config=NetBandConfig(),
+        keypoints=net_calibration_keypoints,
+    )
+    net_hit_events = detect_curved_net_hits(
+        final_coords,
+        net_model,
+        CurvedNetHitConfig(fps=fps, min_confidence=0.55),
+    )
+    log_stage_duration("curved_net_detection", stage_started_at)
     if progress_callback is not None:
         progress_callback("postprocess", 3, 4, "正在识别击球类型")
 
+    stage_started_at = perf_counter()
     shot_classifier = ShotClassifier()
     shot_classifications = shot_classifier.classify_shots(
         player_pixel_detections=player_pixel_bottom,
@@ -367,10 +485,23 @@ def run_inference_v2(
         bounces=final_valid_bounces,
         court_matrices=court_matrices_all,
     )
+    log_stage_duration("shot_and_rally_analysis", stage_started_at)
     if progress_callback is not None:
         progress_callback("postprocess", 4, 4, "正在生成比赛分析数据")
 
+    stage_started_at = perf_counter()
     metadata = build_metadata(fps, frame_width, frame_height, frame_idx)
+    metadata["court_stability"] = {
+        "source_frame": stable_court.frame_index,
+        "consensus_frames": list(stable_court.consensus_frame_indices),
+        "median_deviation_px": round(stable_court.median_deviation_px, 4),
+        "max_deviation_px": round(stable_court.max_deviation_px, 4),
+        "homography": stable_court_matrix.tolist(),
+        "keypoints": [
+            [round(float(point[0]), 2), round(float(point[1]), 2)]
+            for point in stable_court_points
+        ],
+    }
     match_tactics_payload = build_match_tactics_payload(metadata, rally_analysis, net_hit_events)
     match_frames_payload = build_match_frames_payload(
         metadata,
@@ -412,6 +543,8 @@ def run_inference_v2(
         save_json(output_dir_path / "points_heuristic_v2_index_v2.json", points_index_payload, pretty=True)
         save_json(output_dir_path / "shots_v2_intermediate.json", intermediate_payload, pretty=True)
 
+    log_stage_duration("payload_build_and_persist", stage_started_at)
+    log_stage_duration("total", pipeline_started_at)
     return shots_payload, points_payload
 
 
@@ -421,6 +554,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ball_model_path", type=str, default=DEFAULT_BALL_MODEL_PATH)
     parser.add_argument("--player_model_path", type=str, default=DEFAULT_PLAYER_MODEL_PATH)
     parser.add_argument("--court_model_path", type=str, default=DEFAULT_COURT_MODEL_PATH)
+    parser.add_argument("--ball_track_json", type=str, default=None, help="Optional frame-aligned ball-track JSON.")
     parser.add_argument("--output_dir", type=str, default=None, help="Directory for output JSON files.")
     parser.add_argument("--persist_intermediate_json", action="store_true", help="Also save intermediate JSON payloads.")
     return parser.parse_args()
@@ -428,11 +562,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     shots_payload, points_payload = run_inference_v2(
         input_video_path=args.input_video_path,
         ball_model_path=args.ball_model_path,
         player_model_path=args.player_model_path,
         court_model_path=args.court_model_path,
+        ball_track_json=args.ball_track_json,
         output_dir=args.output_dir,
         persist_intermediate_json=args.persist_intermediate_json,
         persist_final_json=True,

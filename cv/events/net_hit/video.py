@@ -1,13 +1,9 @@
 import json
 import os
-from collections import deque
 from dataclasses import asdict
 from typing import List, Optional, Tuple
 
 import cv2
-import torch
-
-from cv.models.ball_tracking.tracknet_runner import TrackNetRunner
 
 from .detector import NetHitConfig, detect_net_hits, make_horizontal_net_line
 
@@ -16,9 +12,8 @@ Point = Optional[Tuple[float, float]]
 
 
 def choose_device(device: str) -> str:
-    if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    return device
+    del device
+    return "tensorflow"
 
 
 def extract_ball_track(
@@ -39,31 +34,27 @@ def extract_ball_track(
     if start_frame > 0:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    runner = TrackNetRunner(model_path=model_path, device=device)
-    buffer = deque(maxlen=3)
-    coords: List[Point] = []
-
-    frame_idx = start_frame
-    processed_frames = 0
-    while True:
-        if end_frame is not None and frame_idx >= end_frame:
-            break
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        buffer.append(frame.copy())
-        ball_xy = None
-        if len(buffer) == 3:
-            ball_xy = runner.infer_model_3_frames(buffer[0], buffer[1], buffer[2])
-        coords.append(ball_xy)
-
-        frame_idx += 1
-        processed_frames += 1
-        if processed_frames % 50 == 0 or frame_idx == total_frames:
-            print(f"Tracking ball: {frame_idx}/{total_frames}")
-
     cap.release()
+    try:
+        from cv.models.ball_tracking.gridtracknet import (
+            GridTrackNet,
+            extract_gridtracknet_coords,
+            load_gridtracknet_h5,
+        )
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Net-hit detection with GridTrackNet requires TensorFlow.") from exc
+
+    grid_model = GridTrackNet()
+    load_gridtracknet_h5(grid_model, model_path)
+    records, _ = extract_gridtracknet_coords(video_path, grid_model)
+    effective_end = min(end_frame, len(records)) if end_frame is not None else len(records)
+    effective_start = min(max(start_frame, 0), effective_end)
+    coords: List[Point] = [
+        tuple(record["pixel"]) if record.get("pixel") is not None else None
+        for record in records[effective_start:effective_end]
+    ]
+    frame_idx = effective_end
+    processed_frames = len(coords)
     return {
         "fps": fps,
         "total_frames": total_frames,

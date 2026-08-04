@@ -12,6 +12,13 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 `run_inference_v2(...)` 仍返回 `(shots_payload, points_payload)`，JSON 与数据库字段保持不变。
 根目录的 `config.py` 统一定义数据、权重和默认数据库路径。
 
+生产球坐标使用 GridTrackNet H5。将权重放在
+`cv/models/weights/model_weights.h5`，或设置 `GRIDTRACKNET_MODEL_PATH`；
+`--ball_model_path` 也可覆盖该路径。旧的 `model_best.pt` 仅供 legacy 路径使用。
+
+固定机位视频的生产球场定位会从 15 个均匀采样帧中选择共识单应矩阵，
+再将同一稳定球场坐标系用于全视频坐标映射。
+
 ## 模块索引
 
 每个生产模块的目录内都有一份简短说明。以下链接也是推荐的阅读顺序。

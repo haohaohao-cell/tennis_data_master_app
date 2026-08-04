@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from cv.config import (
-    DEFAULT_BALL_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_COURT_MODEL_PATH as COURT_MODEL_PATH,
+    DEFAULT_GRIDTRACKNET_MODEL_PATH as BALL_MODEL_PATH,
     DEFAULT_PLAYER_MODEL_PATH as PLAYER_MODEL_PATH,
 )
 from cv.segmentation.points import (

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 import cv2
 import numpy as np
@@ -20,6 +20,37 @@ class StableCourtEstimate:
     consensus_frame_indices: tuple[int, ...]
     median_deviation_px: float
     max_deviation_px: float
+
+
+def sample_frame_indices(total_frames: int, sample_count: int) -> list[int]:
+    if total_frames <= 0:
+        raise ValueError("total_frames must be positive")
+    count = min(max(2, int(sample_count)), total_frames)
+    return sorted({int(round(value)) for value in np.linspace(0, total_frames - 1, count)})
+
+
+def estimate_stable_court_matrix(
+    capture: cv2.VideoCapture,
+    detect_matrix: Callable[[np.ndarray], np.ndarray | None],
+    *,
+    total_frames: int,
+    sample_count: int = 15,
+    court_ref: CourtReference | None = None,
+    max_deviation_px: float = 30.0,
+    min_consensus_size: int = 5,
+) -> StableCourtEstimate:
+    """Sample a fixed-camera video and select one consensus court matrix."""
+    candidates: list[tuple[int, np.ndarray | None]] = []
+    for frame_index in sample_frame_indices(total_frames, sample_count):
+        capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = capture.read()
+        candidates.append((frame_index, detect_matrix(frame) if ok else None))
+    return select_stable_court_matrix(
+        candidates,
+        court_ref=court_ref,
+        max_deviation_px=max_deviation_px,
+        min_consensus_size=min(min_consensus_size, len(candidates)),
+    )
 
 
 def _project_reference_keypoints(
