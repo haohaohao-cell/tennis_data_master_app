@@ -43,6 +43,13 @@ import { colors, radius } from "@/theme";
 
 type UploadMode = "personal" | "lesson_practice" | "coach_demo";
 type LocalVideoStatus = "ready" | "uploading" | "uploaded" | "failed";
+type UploadPhase =
+  | "idle"
+  | "resolving_location"
+  | "creating_activity"
+  | "uploading_file"
+  | "saving_file"
+  | "finalizing_activity";
 
 type LocalVideo = {
   assetId: string | null;
@@ -183,6 +190,8 @@ export default function UploadVideoScreen() {
   const [videos, setVideos] = useState<LocalVideo[]>([]);
   const [intent, setIntent] = useState<UploadIntentResponse | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadingVideoIndex, setUploadingVideoIndex] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +212,47 @@ export default function UploadVideoScreen() {
   );
   const locked = Boolean(intent) || uploading || completed;
   const hasFailedVideos = videos.some((video) => video.status === "failed");
+  const uploadStatus = useMemo(() => {
+    if (!uploading) {
+      return null;
+    }
+    if (uploadPhase === "resolving_location") {
+      return {
+        detail: "定位不可用时也会继续保存活动。",
+        title: "正在确认活动地点",
+      };
+    }
+    if (uploadPhase === "creating_activity") {
+      return {
+        detail: "正在为本次上传创建 Activity 和视频记录。",
+        title: "正在创建活动",
+      };
+    }
+    if (uploadPhase === "uploading_file") {
+      const current = uploadingVideoIndex === null ? null : uploadingVideoIndex + 1;
+      return {
+        detail: "请保持当前页面打开，网络较慢时大视频会多停留一会儿。",
+        title: current ? `正在上传第 ${current}/${videos.length} 个视频` : "正在上传视频",
+      };
+    }
+    if (uploadPhase === "saving_file") {
+      const current = uploadingVideoIndex === null ? null : uploadingVideoIndex + 1;
+      return {
+        detail: "文件已到达服务器，正在保存文件并生成预览图。",
+        title: current ? `正在保存第 ${current}/${videos.length} 个视频` : "正在保存视频",
+      };
+    }
+    if (uploadPhase === "finalizing_activity") {
+      return {
+        detail: "文件已上传完成，正在提交 Activity 并放入待分析队列。",
+        title: "正在进入分析队列",
+      };
+    }
+    return {
+      detail: "正在准备上传。",
+      title: "正在准备上传",
+    };
+  }, [uploadPhase, uploading, uploadingVideoIndex, videos.length]);
 
   useEffect(() => {
     if (cachedLocationResult) {
@@ -413,6 +463,8 @@ export default function UploadVideoScreen() {
     }
 
     setUploading(true);
+    setUploadPhase("resolving_location");
+    setUploadingVideoIndex(null);
     setCompleted(false);
     setError(null);
 
@@ -421,6 +473,7 @@ export default function UploadVideoScreen() {
       setLocationResult(nextLocation);
       let activeIntent = intent;
       if (!activeIntent) {
+        setUploadPhase("creating_activity");
         activeIntent = await createUploadIntent(accessToken, buildPayload(nextLocation));
         setIntent(activeIntent);
         setVideos((current) =>
@@ -449,6 +502,8 @@ export default function UploadVideoScreen() {
         }
 
         try {
+          setUploadPhase("uploading_file");
+          setUploadingVideoIndex(index);
           patchVideo(localVideo.localId, {
             error: null,
             progress: Math.max(localVideo.progress, 0.02),
@@ -462,10 +517,14 @@ export default function UploadVideoScreen() {
               name: localVideo.name,
               uri: localVideo.uri,
             },
-            onProgress: (progress) =>
+            onProgress: (progress) => {
               patchVideo(localVideo.localId, {
                 progress,
-              }),
+              });
+              if (progress >= 1) {
+                setUploadPhase("saving_file");
+              }
+            },
             videoId: serverVideo.video_id,
           });
           patchVideo(localVideo.localId, {
@@ -487,6 +546,8 @@ export default function UploadVideoScreen() {
         return;
       }
 
+      setUploadPhase("finalizing_activity");
+      setUploadingVideoIndex(null);
       const complete = await completeActivityUpload(
         accessToken,
         activeIntent.activity.tennis_activity_id,
@@ -501,6 +562,8 @@ export default function UploadVideoScreen() {
       setError(errorMessage(nextError));
     } finally {
       setUploading(false);
+      setUploadPhase("idle");
+      setUploadingVideoIndex(null);
     }
   }
 
@@ -510,6 +573,8 @@ export default function UploadVideoScreen() {
     }
 
     setUploading(true);
+    setUploadPhase("finalizing_activity");
+    setUploadingVideoIndex(null);
     setError(null);
     try {
       await cancelActivityUpload(accessToken, intent.activity.tennis_activity_id);
@@ -528,6 +593,7 @@ export default function UploadVideoScreen() {
       setError(errorMessage(nextError));
     } finally {
       setUploading(false);
+      setUploadPhase("idle");
     }
   }
 
@@ -837,6 +903,15 @@ export default function UploadVideoScreen() {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         {completed ? <Text style={styles.successText}>上传完成，视频已进入待分析队列。</Text> : null}
+        {uploadStatus ? (
+          <View style={styles.uploadStatusPanel}>
+            <ActivityIndicator color={colors.accentDeep} size="small" />
+            <View style={styles.uploadStatusCopy}>
+              <Text style={styles.uploadStatusTitle}>{uploadStatus.title}</Text>
+              <Text style={styles.uploadStatusDetail}>{uploadStatus.detail}</Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.actionBar}>
           {intent && !completed ? (
@@ -859,7 +934,10 @@ export default function UploadVideoScreen() {
             ]}
           >
             {uploading ? (
-              <ActivityIndicator color={colors.inverse} />
+              <>
+                <ActivityIndicator color={colors.inverse} />
+                <Text style={styles.primaryButtonText}>{uploadStatus?.title ?? "正在上传"}</Text>
+              </>
             ) : (
               <>
                 <Ionicons color={colors.inverse} name="cloud-upload-outline" size={18} />
@@ -1254,6 +1332,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentDeep,
     height: 6,
   },
+  uploadStatusPanel: {
+    alignItems: "center",
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  uploadStatusCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  uploadStatusTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  uploadStatusDetail: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+  },
   iconButton: {
     alignItems: "center",
     backgroundColor: colors.surfaceMuted,
@@ -1277,8 +1381,10 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: colors.inverse,
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: "900",
+    textAlign: "center",
   },
   secondaryButton: {
     alignItems: "center",
