@@ -5,7 +5,7 @@
 ## 公共入口
 
 ```python
-from cv.scripts.run_inference_v2 import run_inference_v2
+from cv.pipeline import run_inference_v2
 from cv.scripts.db_operations import TennisAnalysisRepository
 ```
 
@@ -65,4 +65,4 @@ python -m cv.cli.split_points --source-video /path/to/match.mp4
 python -m cv.cli.init_db
 ```
 
-旧的 `python -m cv.scripts.run_inference_v2` 等命令继续可用。
+旧的 `python -m cv.scripts.run_inference_v2` 命令仅作为兼容别名保留。
