@@ -135,6 +135,8 @@ Request:
   "lesson_id": "uuid-or-null",
   "activity_type": "lesson_practice",
   "default_visibility": "lesson_coach",
+  "started_at": "2026-08-02T10:00:00Z",
+  "court_surface": "hard",
   "location": {
     "source": "device_gps",
     "latitude": 39.9042,

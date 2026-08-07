@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -14,16 +15,25 @@ import {
 
 import { ApiError } from "@/api/client";
 import {
+  cancelActivityUpload,
+  completeActivityUpload,
+  createUploadIntent,
   createTennisActivity,
   listUploadLessons,
+  normalizeVideoDurationMs,
+  normalizeVideoFileName,
+  normalizeVideoMimeType,
   type ActivityType,
   type ActivityVisibility,
   type CourtSurface,
   type LessonOption,
+  type UploadIntentResponse,
+  uploadVideoFile,
 } from "@/api/uploads";
 import {
   formatActivityLocation,
   formatActivityLocationStatus,
+  getActivityLocationFromVideoAsset,
   getCurrentActivityLocation,
   refreshCurrentActivityLocation,
   type MobileLocationResult,
@@ -34,6 +44,31 @@ import { useActivityLocationCache } from "@/location/ActivityLocationProvider";
 import { colors, radius } from "@/theme";
 
 type ActivityRecordKind = "practice" | "match" | "lesson";
+type LocalVideoStatus = "ready" | "uploading" | "uploaded" | "failed";
+type UploadPhase =
+  | "idle"
+  | "resolving_location"
+  | "saving_record"
+  | "creating_activity"
+  | "uploading_file"
+  | "saving_file"
+  | "finalizing_activity";
+
+type LocalVideo = {
+  assetId: string | null;
+  durationMs: number | null;
+  error: string | null;
+  fileSize: number | null;
+  localId: string;
+  mimeType: string | null;
+  name: string;
+  progress: number;
+  serverVideoId: string | null;
+  status: LocalVideoStatus;
+  uri: string;
+};
+
+const MAX_VIDEOS = 20;
 
 const trainingTypeOptions: { icon: IconName; label: string; value: ActivityType }[] = [
   { icon: "tennisball-outline", label: "对打", value: "casual_hit" },
@@ -73,6 +108,26 @@ function errorMessage(error: unknown) {
     return error.message;
   }
   return "保存失败，请稍后重试";
+}
+
+function formatBytes(value: number | null) {
+  if (!value) {
+    return "未知大小";
+  }
+  if (value < 1024 * 1024) {
+    return `${Math.max(1, Math.round(value / 1024))} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(value > 100 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function formatDuration(value: number | null) {
+  if (!value) {
+    return "未知时长";
+  }
+  const seconds = Math.max(0, Math.round(value / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${rest.toString().padStart(2, "0")}`;
 }
 
 function activityTypeLabel(value: ActivityType) {
@@ -133,8 +188,14 @@ export default function CreateActivityScreen() {
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonPickerVisible, setLessonPickerVisible] = useState(false);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [videos, setVideos] = useState<LocalVideo[]>([]);
+  const [uploadDraft, setUploadDraft] = useState<UploadIntentResponse | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadingVideoIndex, setUploadingVideoIndex] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [videoLocationAssetId, setVideoLocationAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selectedLesson = useMemo(
@@ -144,6 +205,55 @@ export default function CreateActivityScreen() {
   const activityType = kind === "match" ? "match" : kind === "lesson" ? "lesson_practice" : trainingType;
   const screenTitle = kind === "match" ? "记录比赛" : kind === "lesson" ? "记录课程" : "记录练习";
   const activeVisibilityOptions = kind === "lesson" ? lessonVisibilityOptions : visibilityOptions;
+  const locked = saving || Boolean(uploadDraft) || completed;
+  const hasFailedVideos = videos.some((video) => video.status === "failed");
+  const uploadStatus = useMemo(() => {
+    if (!saving) {
+      return null;
+    }
+    if (uploadPhase === "resolving_location") {
+      return {
+        detail: "定位不可用时也会继续保存活动。",
+        title: "正在确认活动地点",
+      };
+    }
+    if (uploadPhase === "saving_record") {
+      return {
+        detail: "正在保存这次 Tennis Activity。",
+        title: "正在保存记录",
+      };
+    }
+    if (uploadPhase === "creating_activity") {
+      return {
+        detail: "正在为本次记录创建 Activity 和视频记录。",
+        title: "正在创建活动",
+      };
+    }
+    if (uploadPhase === "uploading_file") {
+      const current = uploadingVideoIndex === null ? null : uploadingVideoIndex + 1;
+      return {
+        detail: "请保持当前页面打开，网络较慢时视频会多停留一会儿。",
+        title: current ? `正在上传第 ${current}/${videos.length} 个视频` : "正在上传视频",
+      };
+    }
+    if (uploadPhase === "saving_file") {
+      const current = uploadingVideoIndex === null ? null : uploadingVideoIndex + 1;
+      return {
+        detail: "文件已到达服务器，正在保存文件并生成预览图。",
+        title: current ? `正在保存第 ${current}/${videos.length} 个视频` : "正在保存视频",
+      };
+    }
+    if (uploadPhase === "finalizing_activity") {
+      return {
+        detail: "文件已上传完成，正在提交 Activity 并放入待分析队列。",
+        title: "正在进入分析队列",
+      };
+    }
+    return {
+      detail: "正在准备保存。",
+      title: "正在准备保存",
+    };
+  }, [saving, uploadPhase, uploadingVideoIndex, videos.length]);
   const titlePlaceholder = useMemo(
     () => defaultTitle(kind, activityType, selectedLesson),
     [activityType, kind, selectedLesson],
@@ -151,7 +261,9 @@ export default function CreateActivityScreen() {
 
   useEffect(() => {
     if (cachedLocationResult) {
-      setLocationResult(cachedLocationResult);
+      setLocationResult((current) =>
+        current?.location.source === "video_metadata" ? current : cachedLocationResult,
+      );
     }
   }, [cachedLocationResult]);
 
@@ -204,39 +316,252 @@ export default function CreateActivityScreen() {
     }
   }
 
-  async function handleSave() {
-    if (!accessToken) {
-      setError("请先登录后再记录活动。");
+  function patchVideo(localId: string, patch: Partial<LocalVideo>) {
+    setVideos((current) =>
+      current.map((video) => (video.localId === localId ? { ...video, ...patch } : video)),
+    );
+  }
+
+  async function handlePickVideos() {
+    if (locked) {
       return;
     }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("无法选择视频", "请允许访问相册后再上传视频。");
+      return;
+    }
+
+    const remaining = MAX_VIDEOS - videos.length;
+    if (remaining <= 0) {
+      Alert.alert("视频数量已满", `一次 activity 最多上传 ${MAX_VIDEOS} 个视频。`);
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsMultipleSelection: true,
+      mediaTypes: ["videos"],
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+      quality: 1,
+      selectionLimit: remaining,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const pickedAssets = result.assets;
+    setVideos((current) => {
+      const knownUris = new Set(current.map((video) => video.uri));
+      const nextVideos = pickedAssets
+        .filter((asset) => asset.uri && !knownUris.has(asset.uri))
+        .slice(0, remaining)
+        .map((asset, index): LocalVideo => {
+          const name = normalizeVideoFileName({
+            fallbackBase: `video-${index}`,
+            fileName: asset.fileName,
+            mimeType: asset.mimeType,
+            uri: asset.uri,
+          });
+          return {
+            assetId: asset.assetId ?? null,
+            durationMs: normalizeVideoDurationMs(asset.duration),
+            error: null,
+            fileSize: asset.fileSize ?? null,
+            localId: `${Date.now()}-${index}-${asset.uri}`,
+            mimeType: normalizeVideoMimeType(asset.mimeType, name),
+            name,
+            progress: 0,
+            serverVideoId: null,
+            status: "ready",
+            uri: asset.uri,
+          };
+        });
+      return [...current, ...nextVideos];
+    });
+
+    for (const asset of pickedAssets) {
+      const videoLocation = await getActivityLocationFromVideoAsset(asset.assetId);
+      if (videoLocation) {
+        setLocationResult(videoLocation);
+        setVideoLocationAssetId(asset.assetId ?? null);
+        break;
+      }
+    }
+  }
+
+  function removeVideo(localId: string) {
+    if (locked) {
+      return;
+    }
+    const removedVideo = videos.find((video) => video.localId === localId);
+    setVideos((current) => current.filter((video) => video.localId !== localId));
+    if (removedVideo?.assetId === videoLocationAssetId || videos.length === 1) {
+      setLocationResult(cachedLocationResult);
+      setVideoLocationAssetId(null);
+    }
+  }
+
+  function buildActivityFields(activeLocation: MobileLocationResult) {
+    return {
+      activity_type: activityType,
+      court_surface: courtSurface,
+      default_visibility: visibility,
+      lesson_id: kind === "lesson" ? selectedLesson?.lesson_id ?? null : null,
+      location: activeLocation.location,
+      note: note.trim() || null,
+      opponent_name: kind === "match" ? opponentName.trim() || null : null,
+      started_at: startedAt.trim() || new Date().toISOString(),
+      title: title.trim() || titlePlaceholder,
+    };
+  }
+
+  function buildUploadPayload(activeLocation: MobileLocationResult) {
+    return {
+      ...buildActivityFields(activeLocation),
+      videos: videos.map((video) => ({
+        file_size_bytes: video.fileSize,
+        mime_type: video.mimeType,
+        original_filename: video.name,
+        visibility: "inherit" as const,
+      })),
+    };
+  }
+
+  function validateBeforeSave() {
+    if (!accessToken) {
+      return "请先登录后再记录活动。";
+    }
     if (kind === "lesson" && !selectedLesson) {
-      setError("记录课程需要先选择一节课程。");
+      return "记录课程需要先选择一节课程。";
+    }
+    return null;
+  }
+
+  async function handleSave() {
+    const validationError = validateBeforeSave();
+    if (validationError || !accessToken) {
+      setError(validationError);
       return;
     }
 
     setSaving(true);
+    setUploadPhase(videos.length ? "resolving_location" : "saving_record");
+    setUploadingVideoIndex(null);
+    setCompleted(false);
     setError(null);
+
     try {
       const nextLocation = locationResult ?? (await getCurrentActivityLocation());
       setLocationResult(nextLocation);
-      const activity = await createTennisActivity(accessToken, {
-        activity_type: activityType,
-        court_surface: courtSurface,
-        default_visibility: visibility,
-        lesson_id: kind === "lesson" ? selectedLesson?.lesson_id ?? null : null,
-        location: nextLocation.location,
-        note: note.trim() || null,
-        opponent_name: kind === "match" ? opponentName.trim() || null : null,
-        started_at: startedAt.trim() || new Date().toISOString(),
-        title: title.trim() || titlePlaceholder,
-      });
 
-      Alert.alert("记录已保存", "这次活动已进入你的 Tennis Activity 档案。", [
+      if (!videos.length) {
+        const activity = await createTennisActivity(accessToken, buildActivityFields(nextLocation));
+        setCompleted(true);
+        Alert.alert("记录已保存", "这次活动已进入你的 Tennis Activity 档案。", [
+          {
+            onPress: () =>
+              router.replace({
+                pathname: "/activity/[id]",
+                params: { id: activity.tennis_activity_id },
+              }),
+            text: "查看详情",
+          },
+        ]);
+        return;
+      }
+
+      let activeDraft = uploadDraft;
+      if (!activeDraft) {
+        setUploadPhase("creating_activity");
+        activeDraft = await createUploadIntent(accessToken, buildUploadPayload(nextLocation));
+        setUploadDraft(activeDraft);
+        setVideos((current) =>
+          current.map((video, index) => ({
+            ...video,
+            serverVideoId: activeDraft?.videos[index]?.video_id ?? video.serverVideoId,
+          })),
+        );
+      }
+
+      let failedCount = 0;
+      const uploadSnapshot = videos;
+      for (let index = 0; index < uploadSnapshot.length; index += 1) {
+        const localVideo = uploadSnapshot[index];
+        if (localVideo.status === "uploaded") {
+          continue;
+        }
+        const serverVideo = activeDraft.videos[index];
+        if (!serverVideo) {
+          failedCount += 1;
+          patchVideo(localVideo.localId, {
+            error: "服务端视频记录缺失",
+            status: "failed",
+          });
+          continue;
+        }
+
+        try {
+          setUploadPhase("uploading_file");
+          setUploadingVideoIndex(index);
+          patchVideo(localVideo.localId, {
+            error: null,
+            progress: Math.max(localVideo.progress, 0.02),
+            serverVideoId: serverVideo.video_id,
+            status: "uploading",
+          });
+          await uploadVideoFile({
+            accessToken,
+            file: {
+              mimeType: localVideo.mimeType,
+              name: localVideo.name,
+              uri: localVideo.uri,
+            },
+            onProgress: (progress) => {
+              patchVideo(localVideo.localId, { progress });
+              if (progress >= 1) {
+                setUploadPhase("saving_file");
+              }
+            },
+            videoId: serverVideo.video_id,
+          });
+          patchVideo(localVideo.localId, {
+            error: null,
+            progress: 1,
+            status: "uploaded",
+          });
+        } catch (uploadError) {
+          failedCount += 1;
+          patchVideo(localVideo.localId, {
+            error: errorMessage(uploadError),
+            status: "failed",
+          });
+        }
+      }
+
+      if (failedCount > 0) {
+        setError("部分视频上传失败，请检查网络后重试失败项。");
+        return;
+      }
+
+      setUploadPhase("finalizing_activity");
+      setUploadingVideoIndex(null);
+      const complete = await completeActivityUpload(
+        accessToken,
+        activeDraft.activity.tennis_activity_id,
+      );
+      setUploadDraft({
+        activity: complete.activity,
+        videos: complete.videos,
+      });
+      setCompleted(true);
+      Alert.alert("记录已保存", "活动和视频已保存，稍后会进入分析流程。", [
         {
           onPress: () =>
             router.replace({
               pathname: "/activity/[id]",
-              params: { id: activity.tennis_activity_id },
+              params: { id: complete.activity.tennis_activity_id },
             }),
           text: "查看详情",
         },
@@ -245,6 +570,38 @@ export default function CreateActivityScreen() {
       setError(errorMessage(nextError));
     } finally {
       setSaving(false);
+      setUploadPhase("idle");
+      setUploadingVideoIndex(null);
+    }
+  }
+
+  async function handleCancelDraft() {
+    if (!accessToken || !uploadDraft || saving) {
+      return;
+    }
+
+    setSaving(true);
+    setUploadPhase("finalizing_activity");
+    setUploadingVideoIndex(null);
+    setError(null);
+    try {
+      await cancelActivityUpload(accessToken, uploadDraft.activity.tennis_activity_id);
+      setUploadDraft(null);
+      setCompleted(false);
+      setVideos((current) =>
+        current.map((video) => ({
+          ...video,
+          error: null,
+          progress: 0,
+          serverVideoId: null,
+          status: "ready",
+        })),
+      );
+    } catch (nextError) {
+      setError(errorMessage(nextError));
+    } finally {
+      setSaving(false);
+      setUploadPhase("idle");
     }
   }
 
@@ -310,10 +667,10 @@ export default function CreateActivityScreen() {
           </Text>
           <Text style={styles.contextMeta}>
             {kind === "match"
-              ? "保存一次比赛记录；不需要先上传视频。"
+              ? "保存比赛记录，也可以同时从相册上传比赛视频。"
               : kind === "lesson"
-                ? "记录你在某节课程里的练习、反馈和课后重点。"
-                : "保存一次练习记录；视频和分析可以后续归入日记。"}
+                ? "记录课程重点，也可以同时从相册上传课堂视频。"
+                : "保存一次练习记录，也可以同时从相册上传练习视频。"}
           </Text>
         </View>
       </View>
@@ -327,9 +684,10 @@ export default function CreateActivityScreen() {
               return (
                 <Pressable
                   accessibilityRole="button"
+                  disabled={locked}
                   key={option.value}
                   onPress={() => setTrainingType(option.value)}
-                  style={[styles.optionItem, selected && styles.optionItemActive]}
+                  style={[styles.optionItem, selected && styles.optionItemActive, locked && styles.disabledBlock]}
                 >
                   <Ionicons
                     color={selected ? colors.ink : colors.inkSoft}
@@ -351,9 +709,9 @@ export default function CreateActivityScreen() {
           <Text style={styles.sectionTitle}>课程</Text>
           <Pressable
             accessibilityRole="button"
-            disabled={saving || lessonsLoading}
+            disabled={locked || lessonsLoading}
             onPress={() => setLessonPickerVisible(true)}
-            style={[styles.lessonSelectCard, (saving || lessonsLoading) && styles.disabledBlock]}
+            style={[styles.lessonSelectCard, (locked || lessonsLoading) && styles.disabledBlock]}
           >
             <View style={styles.locationIcon}>
               {lessonsLoading ? (
@@ -382,7 +740,7 @@ export default function CreateActivityScreen() {
         <View style={styles.fieldBlock}>
           <Text style={styles.label}>标题</Text>
           <TextInput
-            editable={!saving}
+            editable={!locked}
             maxLength={120}
             onChangeText={setTitle}
             placeholder={titlePlaceholder}
@@ -394,7 +752,7 @@ export default function CreateActivityScreen() {
         <View style={styles.fieldBlock}>
           <Text style={styles.label}>时间</Text>
           <TextInput
-            editable={!saving}
+            editable={!locked}
             maxLength={40}
             onChangeText={setStartedAt}
             placeholder="留空则使用当前时间"
@@ -407,9 +765,9 @@ export default function CreateActivityScreen() {
           <Text style={styles.label}>地点</Text>
           <Pressable
             accessibilityRole="button"
-            disabled={saving || locating}
+            disabled={locked || locating}
             onPress={refreshLocation}
-            style={[styles.locationCard, (saving || locating) && styles.disabledBlock]}
+            style={[styles.locationCard, (locked || locating) && styles.disabledBlock]}
           >
             <View style={styles.locationIcon}>
               {locating ? (
@@ -435,7 +793,7 @@ export default function CreateActivityScreen() {
           <View style={styles.fieldBlock}>
             <Text style={styles.label}>对手</Text>
             <TextInput
-              editable={!saving}
+              editable={!locked}
               maxLength={50}
               onChangeText={setOpponentName}
               placeholder="对手姓名或队伍"
@@ -448,7 +806,7 @@ export default function CreateActivityScreen() {
         <View style={styles.fieldBlock}>
           <Text style={styles.label}>备注</Text>
           <TextInput
-            editable={!saving}
+            editable={!locked}
             multiline
             onChangeText={setNote}
             placeholder={
@@ -473,10 +831,10 @@ export default function CreateActivityScreen() {
             return (
               <Pressable
                 accessibilityRole="button"
-                disabled={saving}
+                disabled={locked}
                 key={option.value}
                 onPress={() => setCourtSurface(selected ? null : option.value)}
-                style={[styles.chip, selected && styles.chipActive]}
+                style={[styles.chip, selected && styles.chipActive, locked && styles.disabledBlock]}
               >
                 <Text style={[styles.chipText, selected && styles.chipTextActive]}>
                   {option.label}
@@ -495,10 +853,10 @@ export default function CreateActivityScreen() {
             return (
               <Pressable
                 accessibilityRole="button"
-                disabled={saving}
+                disabled={locked}
                 key={option.value}
                 onPress={() => setVisibility(option.value)}
-                style={[styles.chip, selected && styles.chipActive]}
+                style={[styles.chip, selected && styles.chipActive, locked && styles.disabledBlock]}
               >
                 <Text style={[styles.chipText, selected && styles.chipTextActive]}>
                   {option.label}
@@ -509,23 +867,121 @@ export default function CreateActivityScreen() {
         </View>
       </View>
 
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>相册视频</Text>
+          <Text style={styles.countText}>
+            {videos.length}/{MAX_VIDEOS}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={locked}
+          onPress={handlePickVideos}
+          style={[styles.addVideoButton, locked && styles.disabledBlock]}
+        >
+          <Ionicons color={colors.ink} name="albums-outline" size={20} />
+          <Text style={styles.addVideoText}>选择视频</Text>
+        </Pressable>
+
+        <View style={styles.videoList}>
+          {videos.map((video) => (
+            <View key={video.localId} style={styles.videoRow}>
+              <View style={styles.videoIcon}>
+                <Ionicons color={colors.accentDeep} name="videocam-outline" size={19} />
+              </View>
+              <View style={styles.videoBody}>
+                <Text numberOfLines={1} style={styles.videoName}>
+                  {video.name}
+                </Text>
+                <Text style={styles.videoMeta}>
+                  {formatBytes(video.fileSize)} · {formatDuration(video.durationMs)}
+                </Text>
+                {video.status !== "ready" ? (
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[styles.progressFill, { width: `${Math.round(video.progress * 100)}%` }]}
+                    />
+                  </View>
+                ) : null}
+                {video.error ? <Text style={styles.errorText}>{video.error}</Text> : null}
+              </View>
+              <View style={styles.videoTrailing}>
+                {video.status === "uploaded" ? (
+                  <Ionicons color={colors.accentDeep} name="checkmark-circle" size={20} />
+                ) : video.status === "uploading" ? (
+                  <ActivityIndicator color={colors.accentDeep} size="small" />
+                ) : video.status === "failed" ? (
+                  <Ionicons color="#B14A3D" name="alert-circle" size={20} />
+                ) : (
+                  <Pressable
+                    accessibilityLabel={`移除视频 ${video.name}`}
+                    accessibilityRole="button"
+                    onPress={() => removeVideo(video.localId)}
+                    style={styles.iconButton}
+                  >
+                    <Ionicons color={colors.muted} name="close" size={17} />
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {uploadDraft ? (
+        <View style={styles.intentPanel}>
+          <Text style={styles.intentTitle}>Activity 草稿已创建</Text>
+          <Text numberOfLines={1} style={styles.intentId}>
+            {uploadDraft.activity.tennis_activity_id}
+          </Text>
+        </View>
+      ) : null}
+
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      <Pressable
-        accessibilityRole="button"
-        disabled={saving}
-        onPress={handleSave}
-        style={[styles.primaryButton, saving && styles.disabledButton]}
-      >
-        {saving ? (
-          <ActivityIndicator color={colors.inverse} />
-        ) : (
-          <>
-            <Ionicons color={colors.inverse} name="checkmark-circle-outline" size={18} />
-            <Text style={styles.primaryButtonText}>保存记录</Text>
-          </>
-        )}
-      </Pressable>
+      {uploadStatus ? (
+        <View style={styles.uploadStatusPanel}>
+          <ActivityIndicator color={colors.accentDeep} size="small" />
+          <View style={styles.uploadStatusCopy}>
+            <Text style={styles.uploadStatusTitle}>{uploadStatus.title}</Text>
+            <Text style={styles.uploadStatusDetail}>{uploadStatus.detail}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.actionBar}>
+        {uploadDraft && !completed ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={saving}
+            onPress={handleCancelDraft}
+            style={[styles.secondaryButton, saving && styles.disabledBlock]}
+          >
+            <Text style={styles.secondaryButtonText}>取消上传草稿</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          disabled={saving || completed}
+          onPress={handleSave}
+          style={[styles.primaryButton, (saving || completed) && styles.disabledButton]}
+        >
+          {saving ? (
+            <>
+              <ActivityIndicator color={colors.inverse} />
+              <Text style={styles.primaryButtonText}>{uploadStatus?.title ?? "正在保存"}</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons color={colors.inverse} name="checkmark-circle-outline" size={18} />
+              <Text style={styles.primaryButtonText}>
+                {uploadDraft ? (hasFailedVideos ? "重试失败视频" : "继续上传视频") : videos.length ? "保存并上传视频" : "保存记录"}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      </View>
       </ScrollPage>
 
       <LessonPickerModal
@@ -642,6 +1098,11 @@ const styles = StyleSheet.create({
   section: {
     gap: 12,
   },
+  sectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
   sectionTitle: {
     color: colors.ink,
     fontSize: 17,
@@ -753,14 +1214,150 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: colors.inverse,
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: "900",
+    textAlign: "center",
   },
   disabledButton: {
     opacity: 0.52,
   },
   disabledBlock: {
     opacity: 0.52,
+  },
+  addVideoButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 9,
+    justifyContent: "center",
+    minHeight: 54,
+  },
+  addVideoText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  countText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  videoList: {
+    gap: 9,
+  },
+  videoRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 11,
+    minHeight: 76,
+    padding: 12,
+  },
+  videoIcon: {
+    alignItems: "center",
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.control,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  videoBody: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  videoName: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  videoMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  videoTrailing: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 32,
+  },
+  progressTrack: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 3,
+    height: 6,
+    overflow: "hidden",
+  },
+  progressFill: {
+    backgroundColor: colors.accentDeep,
+    height: 6,
+  },
+  uploadStatusPanel: {
+    alignItems: "center",
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  uploadStatusCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  uploadStatusTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  uploadStatusDetail: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+  },
+  actionBar: {
+    gap: 10,
+    marginTop: 2,
+  },
+  secondaryButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 48,
+  },
+  secondaryButtonText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  intentPanel: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.card,
+    gap: 4,
+    padding: 12,
+  },
+  intentTitle: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  intentId: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "800",
   },
   locationCard: {
     alignItems: "center",

@@ -12,19 +12,19 @@ const journalActions = [
     icon: "fitness-outline",
     kind: "practice",
     label: "记录练习",
-    subtitle: "保存一次练习日记，可后续补充视频和分析",
+    subtitle: "保存练习日记，可同时上传相册视频",
   },
   {
     icon: "trophy-outline",
     kind: "match",
     label: "记录比赛",
-    subtitle: "保存比赛过程、对手和赛后复盘",
+    subtitle: "保存比赛过程，也可上传比赛视频",
   },
   {
     icon: "school-outline",
     kind: "lesson",
     label: "记录课程",
-    subtitle: "绑定课程后记录课堂重点、反馈和作业",
+    subtitle: "绑定课程后记录重点，也可上传课堂视频",
   },
 ] as const;
 

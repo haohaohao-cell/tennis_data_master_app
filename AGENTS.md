@@ -102,6 +102,8 @@ If the user's request changes an existing feature, update the relevant part of `
 
 Keep the specification concise, factual, and aligned with the actual product behavior. Do not invent product requirements that the user has not confirmed.
 
+Keep `docs/ui/UI_NAMING_REGISTRY.md` in sync with product changes. When adding or changing visible pages, sections, dialogs, drawers, sheets, or key reusable components, register their stable UI names there.
+
 ## Encoding
 
 Use UTF-8 for all source code, configuration files, documentation, database scripts, and text assets. Do not save files with GBK, ANSI, or other legacy encodings.

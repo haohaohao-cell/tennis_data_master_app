@@ -146,6 +146,7 @@ export type UploadIntentPayload = {
   ended_at?: string | null;
   location_name?: string | null;
   location?: ActivityLocationPayload | null;
+  court_surface?: CourtSurface | null;
   note?: string | null;
   opponent_user_id?: string | null;
   opponent_name?: string | null;
