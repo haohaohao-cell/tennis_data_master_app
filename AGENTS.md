@@ -44,6 +44,8 @@ Field names, meanings, units, enum values, and data structures should stay consi
 
 When adding or changing data fields, update the global data dictionary and check affected upstream and downstream consumers.
 
+When changing database design, also provide executable migration scripts or clear steps so other collaborators can apply the change and run the project successfully.
+
 Treat `shared/` schemas and constants as cross-application contracts. Update all relevant consumers together when changing shared data structures.
 
 ## Local Documentation
