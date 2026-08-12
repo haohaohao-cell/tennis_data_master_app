@@ -2,8 +2,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 import { getCoachIdentity, type CoachIdentity } from "@/api/coach";
 import { ApiError } from "@/api/client";
@@ -378,6 +388,35 @@ function ProfileMenuDrawer({
   visible: boolean;
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const translateX = useRef(new Animated.Value(width)).current;
+  const [mounted, setMounted] = useState(visible);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateX.setValue(width);
+      const animation = Animated.timing(translateX, {
+        duration: 240,
+        toValue: 0,
+        useNativeDriver: true,
+      });
+      animation.start();
+      return animation.stop;
+    }
+
+    const animation = Animated.timing(translateX, {
+      duration: 200,
+      toValue: width,
+      useNativeDriver: true,
+    });
+    animation.start(({ finished }) => {
+      if (finished) {
+        setMounted(false);
+      }
+    });
+    return animation.stop;
+  }, [translateX, visible, width]);
 
   function open(pathname: "/profile/edit" | "/profile/settings" | "/profile/coach-apply") {
     onClose();
@@ -385,9 +424,12 @@ function ProfileMenuDrawer({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
+    <Modal animationType="none" onRequestClose={onClose} transparent visible={mounted}>
       <Pressable accessibilityRole="button" onPress={onClose} style={styles.drawerBackdrop}>
-        <View onStartShouldSetResponder={() => true} style={styles.sideDrawer}>
+        <Animated.View
+          onStartShouldSetResponder={() => true}
+          style={[styles.sideDrawer, { transform: [{ translateX }] }]}
+        >
           <View style={styles.drawerHeader}>
             <View>
               <Text style={styles.drawerKicker}>我的功能</Text>
@@ -423,7 +465,7 @@ function ProfileMenuDrawer({
               title="设置"
             />
           </View>
-        </View>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
