@@ -21,9 +21,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { resolveMediaUrl } from "@/api/activityDetail";
 import { ApiError } from "@/api/client";
-import { peekPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
+import { clearPostDetailPreview, peekPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
 import {
   createPostComment,
+  deletePost,
   favoritePost,
   getReadablePostDetail,
   likePost,
@@ -124,7 +125,7 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const requireAuth = useRequireAuth();
   const { id, focus } = useLocalSearchParams<{ focus?: string; id?: string }>();
-  const { accessToken, status } = useAuth();
+  const { accessToken, status, userId } = useAuth();
   const postId = typeof id === "string" ? id : null;
   const [detail, setDetail] = useState<PostDetailResponse | null>(() =>
     peekPostDetailPreview(postId),
@@ -132,6 +133,7 @@ export default function PostDetailScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [interactionPending, setInteractionPending] = useState<"favorite" | "like" | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(focus === "comments");
   const [comments, setComments] = useState<PostCommentRecord[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -313,6 +315,30 @@ export default function PostDetailScreen() {
     router.push({ pathname: "/activity/[id]", params: { id: sourceActivityId } });
   }, [detail?.post.source_tennis_activity_id, postId, requireAuth, router]);
 
+  const confirmDelete = useCallback(() => {
+    if (!postId || !accessToken || deleting) {
+      return;
+    }
+
+    Alert.alert("删除动态", "删除后将无法恢复，确定要删除吗？", [
+      { style: "cancel", text: "取消" },
+      {
+        style: "destructive",
+        text: "删除",
+        onPress: () => {
+          setDeleting(true);
+          void deletePost(accessToken, postId)
+            .then(() => {
+              clearPostDetailPreview(postId);
+              router.back();
+            })
+            .catch((deleteError) => Alert.alert("删除失败", detailErrorMessage(deleteError)))
+            .finally(() => setDeleting(false));
+        },
+      },
+    ]);
+  }, [accessToken, deleting, postId, router]);
+
   if ((status === "loading" || loading) && !detail) {
     return <StateScreen loading message="正在加载动态..." onBack={() => router.back()} />;
   }
@@ -362,6 +388,21 @@ export default function PostDetailScreen() {
             <View style={styles.refreshBadge}>
               <ActivityIndicator color={colors.inverse} size="small" />
             </View>
+          ) : null}
+          {detail.post.author_user_id === userId ? (
+            <Pressable
+              accessibilityLabel="删除动态"
+              accessibilityRole="button"
+              disabled={deleting}
+              onPress={confirmDelete}
+              style={styles.iconButton}
+            >
+              {deleting ? (
+                <ActivityIndicator color={colors.inverse} size="small" />
+              ) : (
+                <Ionicons color={colors.inverse} name="trash-outline" size={21} />
+              )}
+            </Pressable>
           ) : null}
         </View>
 

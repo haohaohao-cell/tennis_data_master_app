@@ -39,6 +39,12 @@ export function primePostDetailPreview(detail: PostDetailResponse) {
   pruneOverflow();
 }
 
+export function clearPostDetailPreview(socialPostId: string | null | undefined) {
+  if (socialPostId) {
+    cachedDetails.delete(socialPostId);
+  }
+}
+
 export function peekPostDetailPreview(socialPostId: string | null | undefined) {
   if (!socialPostId) {
     return null;

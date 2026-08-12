@@ -22,6 +22,7 @@ from backend.app.uploads.schemas import (
     ActivityDetailPermissions,
     ActivityDetailResponse,
     ActivityDetailSummary,
+    ActivityDeleteResponse,
     LessonOption,
     TennisActivityCreate,
     TennisActivityRecord,
@@ -981,6 +982,57 @@ def cancel_activity_upload(user_id: str, tennis_activity_id: str) -> UploadCance
             ).fetchall()
         ]
         return UploadCancelResponse(success=True, activity=activity, videos=videos)
+
+
+def delete_activity(user_id: str, tennis_activity_id: str) -> ActivityDeleteResponse:
+    now = utc_now_iso()
+    local_media_paths: list[tuple[str, str | None]] = []
+    with transaction() as connection:
+        _select_owned_activity(connection, tennis_activity_id, user_id)
+        video_rows = _select_activity_videos(connection, tennis_activity_id)
+        for row in video_rows:
+            referenced = connection.execute(
+                """
+                SELECT 1
+                FROM post_media
+                JOIN social_posts ON social_posts.social_post_id = post_media.social_post_id
+                WHERE post_media.video_id = ?
+                  AND post_media.deleted_at IS NULL
+                  AND social_posts.deleted_at IS NULL
+                  AND social_posts.status <> 'deleted'
+                LIMIT 1;
+                """,
+                (row["video_id"],),
+            ).fetchone()
+            if referenced is None:
+                local_media_paths.append((row["video_path"], row["thumbnail_path"]))
+                connection.execute(
+                    """
+                    UPDATE videos
+                    SET upload_status = 'canceled',
+                        analysis_status = 'canceled',
+                        deleted_at = ?
+                    WHERE video_id = ?
+                      AND deleted_at IS NULL;
+                    """,
+                    (now, row["video_id"]),
+                )
+
+        connection.execute(
+            """
+            UPDATE tennis_activities
+            SET analysis_summary_status = 'failed',
+                deleted_at = ?
+            WHERE tennis_activity_id = ?;
+            """,
+            (now, tennis_activity_id),
+        )
+
+    for video_path, thumbnail_path in local_media_paths:
+        delete_local_video_if_present(video_path)
+        delete_public_storage_file_if_present(thumbnail_path)
+
+    return ActivityDeleteResponse(success=True, id=tennis_activity_id)
 
 
 def get_activity_detail(user_id: str, tennis_activity_id: str) -> ActivityDetailResponse:

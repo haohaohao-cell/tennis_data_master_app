@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Modal,
   Pressable,
@@ -19,8 +20,10 @@ import { getCoachIdentity, type CoachIdentity } from "@/api/coach";
 import { ApiError } from "@/api/client";
 import { formatActivityLocation } from "@/api/location";
 import { resolveMediaUrl } from "@/api/activityDetail";
-import { primePostDetailPreview } from "@/api/postDetailPreviewCache";
+import { deleteActivity } from "@/api/uploads";
+import { clearPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
 import {
+  deletePost,
   getMyPostCollection,
   unfavoritePost,
   unlikePost,
@@ -174,6 +177,7 @@ export default function ProfileScreen() {
             router.push("/profile/coach-apply");
           }}
           onRetryContent={loadProfileContent}
+          onRefreshContent={loadProfileContent}
         />
       ) : (
         <CoachWorkspace coachIdentity={coachIdentity} onSwitchToPlayer={() => setMode("player")} />
@@ -237,6 +241,7 @@ function PlayerProfile({
   content,
   contentError,
   contentLoading,
+  onRefreshContent,
   onSwitchToCoach,
   onRetryContent,
 }: {
@@ -245,6 +250,7 @@ function PlayerProfile({
   content: ProfileContent | null;
   contentError: string | null;
   contentLoading: boolean;
+  onRefreshContent: () => Promise<void>;
   onSwitchToCoach: () => void;
   onRetryContent: () => void;
 }) {
@@ -340,6 +346,7 @@ function PlayerProfile({
         error={contentError}
         loading={contentLoading}
         onRetry={onRetryContent}
+        onRefreshContent={onRefreshContent}
         tab={activeTab}
       />
 
@@ -496,17 +503,20 @@ function PlayerTabContent({
   content,
   error,
   loading,
+  onRefreshContent,
   onRetry,
   tab,
 }: {
   content: ProfileContent | null;
   error: string | null;
   loading: boolean;
+  onRefreshContent: () => Promise<void>;
   onRetry: () => void;
   tab: PlayerTab;
 }) {
   const router = useRouter();
   const { accessToken } = useAuth();
+  const [deletingContentId, setDeletingContentId] = useState<string | null>(null);
   const [collectionStates, setCollectionStates] = useState<
     Record<PostCollectionKind, PostCollectionState>
   >(() => ({
@@ -619,6 +629,55 @@ function PlayerTabContent({
     [accessToken, updateCollectionState],
   );
 
+  const deleteOwnedPost = useCallback(
+    (socialPostId: string) => {
+      if (!accessToken || deletingContentId) {
+        return;
+      }
+      Alert.alert("删除动态", "删除后将无法恢复，确定要删除吗？", [
+        { style: "cancel", text: "取消" },
+        {
+          style: "destructive",
+          text: "删除",
+          onPress: () => {
+            setDeletingContentId(socialPostId);
+            void deletePost(accessToken, socialPostId)
+              .then(async () => {
+                clearPostDetailPreview(socialPostId);
+                await onRefreshContent();
+              })
+              .catch((error) => Alert.alert("删除失败", profileContentErrorMessage(error)))
+              .finally(() => setDeletingContentId(null));
+          },
+        },
+      ]);
+    },
+    [accessToken, deletingContentId, onRefreshContent],
+  );
+
+  const deleteOwnedActivity = useCallback(
+    (tennisActivityId: string) => {
+      if (!accessToken || deletingContentId) {
+        return;
+      }
+      Alert.alert("删除日记", "删除后将无法恢复，确定要删除吗？", [
+        { style: "cancel", text: "取消" },
+        {
+          style: "destructive",
+          text: "删除",
+          onPress: () => {
+            setDeletingContentId(tennisActivityId);
+            void deleteActivity(accessToken, tennisActivityId)
+              .then(() => onRefreshContent())
+              .catch((error) => Alert.alert("删除失败", profileContentErrorMessage(error)))
+              .finally(() => setDeletingContentId(null));
+          },
+        },
+      ]);
+    },
+    [accessToken, deletingContentId, onRefreshContent],
+  );
+
   if (tab === "posts") {
     if (loading && !content) {
       return <ContentLoading />;
@@ -639,7 +698,13 @@ function PlayerTabContent({
     return (
       <View style={styles.contentGrid}>
         {content.posts.map((post) => (
-          <ProfilePostTile key={post.social_post_id} post={post} />
+          <ProfilePostTile
+            actionLabel="删除动态"
+            actionLoading={deletingContentId === post.social_post_id}
+            key={post.social_post_id}
+            onAction={() => deleteOwnedPost(post.social_post_id)}
+            post={post}
+          />
         ))}
       </View>
     );
@@ -670,6 +735,8 @@ function PlayerTabContent({
           <ProfileActivityRow
             activity={activity}
             key={activity.tennis_activity_id}
+            onDelete={() => deleteOwnedActivity(activity.tennis_activity_id)}
+            deleting={deletingContentId === activity.tennis_activity_id}
             onPress={() =>
               router.push({
                 pathname: "/activity/[id]",
@@ -1000,7 +1067,13 @@ function ProfilePostTile({
           ) : (
             <Ionicons
               color={colors.ink}
-              name={actionLabel === "取消收藏" ? "bookmark" : "heart"}
+              name={
+                actionLabel === "取消收藏"
+                  ? "bookmark"
+                  : actionLabel === "取消点赞"
+                    ? "heart"
+                    : "trash-outline"
+              }
               size={17}
             />
           )}
@@ -1069,9 +1142,13 @@ function analysisStatusLabel(value: ProfileActivity["analysis_status"]) {
 
 function ProfileActivityRow({
   activity,
+  deleting = false,
+  onDelete,
   onPress,
 }: {
   activity: ProfileActivity;
+  deleting?: boolean;
+  onDelete?: () => void;
   onPress: () => void;
 }) {
   const title = activity.title || activity.first_video?.original_filename || "未命名 Activity";
@@ -1110,6 +1187,24 @@ function ProfileActivityRow({
         <Text numberOfLines={2} style={styles.windowMeta}>{metaParts.join(" · ")}</Text>
       </View>
       <Pill>{activityTypeLabel(activity.activity_type)}</Pill>
+      {onDelete ? (
+        <Pressable
+          accessibilityLabel="删除日记"
+          accessibilityRole="button"
+          disabled={deleting}
+          onPress={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          style={styles.activityDeleteButton}
+        >
+          {deleting ? (
+            <ActivityIndicator color={colors.clay} size="small" />
+          ) : (
+            <Ionicons color={colors.clay} name="trash-outline" size={18} />
+          )}
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -1670,6 +1765,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  activityDeleteButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 36,
+    minWidth: 36,
   },
   activityThumb: {
     backgroundColor: colors.ink,

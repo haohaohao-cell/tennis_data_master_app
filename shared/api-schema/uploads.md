@@ -231,6 +231,25 @@ GET /tennis-activities/{tennis_activity_id}
 
 Returns the current user's view of an activity detail page: the activity, visible videos, optional lesson context, permissions, and aggregate status summary. See `shared/api-schema/activity-detail.md` for the full response contract and lesson visibility rules.
 
+## Delete Activity
+
+```text
+DELETE /tennis-activities/{tennis_activity_id}
+```
+
+Deletes an Activity owned by the current user. Non-owners and already deleted Activities receive `404`.
+
+The database record is soft-deleted. Videos that are not referenced by an active Post are also soft-deleted and their locally managed video and thumbnail files are removed. Videos still used by an active Post are retained so deleting an Activity cannot break an existing dynamic.
+
+Response:
+
+```json
+{
+  "success": true,
+  "id": "uuid"
+}
+```
+
 ## Upload Video File
 
 ```text
