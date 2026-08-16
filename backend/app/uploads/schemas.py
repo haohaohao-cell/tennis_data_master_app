@@ -308,6 +308,11 @@ class UploadCancelResponse(BaseModel):
     videos: list[VideoRecord]
 
 
+class ActivityDeleteResponse(BaseModel):
+    success: bool
+    id: str
+
+
 class LessonOption(BaseModel):
     lesson_id: str
     coach_user_id: str

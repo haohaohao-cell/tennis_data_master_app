@@ -166,6 +166,11 @@ export type UploadCancelResponse = UploadIntentResponse & {
   success: boolean;
 };
 
+export type ActivityDeleteResponse = {
+  success: boolean;
+  id: string;
+};
+
 export type VideoFileUploadResponse = {
   video: VideoRecord;
 };
@@ -290,6 +295,13 @@ export function createTennisActivity(accessToken: string, payload: TennisActivit
     accessToken,
     body: payload,
     method: "POST",
+  });
+}
+
+export function deleteActivity(accessToken: string, tennisActivityId: string) {
+  return apiRequest<ActivityDeleteResponse>(`/api/v1/tennis-activities/${tennisActivityId}`, {
+    accessToken,
+    method: "DELETE",
   });
 }
 

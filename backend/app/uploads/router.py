@@ -9,6 +9,7 @@ from backend.app.auth.schemas import UserPublic
 from backend.app.uploads import service
 from backend.app.uploads.schemas import (
     ActivityDetailResponse,
+    ActivityDeleteResponse,
     LessonOptionListResponse,
     TennisActivityCreate,
     TennisActivityRecord,
@@ -60,6 +61,17 @@ def get_upload_activity(
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ) -> ActivityDetailResponse:
     return service.get_activity_detail(current_user.user_id, tennis_activity_id)
+
+
+@router.delete(
+    "/tennis-activities/{tennis_activity_id}",
+    response_model=ActivityDeleteResponse,
+)
+def delete_tennis_activity(
+    tennis_activity_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> ActivityDeleteResponse:
+    return service.delete_activity(current_user.user_id, tennis_activity_id)
 
 
 @router.post(

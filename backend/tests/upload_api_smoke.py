@@ -198,6 +198,48 @@ async def main() -> None:
         assert detail.status == 200, detail
         assert detail.json_body["videos"][0]["upload_status"] == "uploaded"
 
+        other_login = await asgi_request(
+            app,
+            "POST",
+            "/api/v1/auth/phone-login",
+            {"phone": "13700000002", "code": "000000"},
+        )
+        assert other_login.status == 200, other_login
+        other_delete = await asgi_request(
+            app,
+            "DELETE",
+            f"/api/v1/tennis-activities/{activity_id}",
+            headers={"authorization": f"Bearer {other_login.json_body['access_token']}"},
+        )
+        assert other_delete.status == 404, other_delete
+
+        deleted = await asgi_request(
+            app,
+            "DELETE",
+            f"/api/v1/tennis-activities/{activity_id}",
+            headers=headers,
+        )
+        assert deleted.status == 200, deleted
+        assert deleted.json_body == {"success": True, "id": activity_id}
+        assert not stored_file.exists()
+        assert not thumbnail_file.exists()
+
+        deleted_detail = await asgi_request(
+            app,
+            "GET",
+            f"/api/v1/tennis-activities/{activity_id}",
+            headers=headers,
+        )
+        assert deleted_detail.status == 404, deleted_detail
+
+        repeated_delete = await asgi_request(
+            app,
+            "DELETE",
+            f"/api/v1/tennis-activities/{activity_id}",
+            headers=headers,
+        )
+        assert repeated_delete.status == 404, repeated_delete
+
         record = await asgi_request(
             app,
             "POST",
@@ -240,6 +282,14 @@ async def main() -> None:
         assert record_detail.json_body["summary"]["video_count"] == 0
         assert record_detail.json_body["summary"]["analysis_status"] == "none"
         assert record_detail.json_body["videos"] == []
+
+        record_deleted = await asgi_request(
+            app,
+            "DELETE",
+            f"/api/v1/tennis-activities/{record_activity_id}",
+            headers=headers,
+        )
+        assert record_deleted.status == 200, record_deleted
 
         match_upload_intent = await asgi_request(
             app,
