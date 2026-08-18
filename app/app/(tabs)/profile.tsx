@@ -53,6 +53,11 @@ import { colors, radius } from "@/theme";
 
 type ProfileMode = "player" | "coach";
 type PlayerTab = "posts" | "matches" | "training" | "courses" | "saved" | "liked" | "data";
+type PostVisibilityFilter = "all" | "public" | "private";
+type PopoverAnchor = {
+  right: number;
+  top: number;
+};
 type PostCollectionState = {
   error: string | null;
   hasMore: boolean;
@@ -517,6 +522,11 @@ function PlayerTabContent({
   const router = useRouter();
   const { accessToken } = useAuth();
   const [deletingContentId, setDeletingContentId] = useState<string | null>(null);
+  const [postVisibilityFilter, setPostVisibilityFilter] = useState<PostVisibilityFilter>("all");
+  const [postFilterOpen, setPostFilterOpen] = useState(false);
+  const [postFilterAnchor, setPostFilterAnchor] = useState<PopoverAnchor | null>(null);
+  const postFilterButtonRef = useRef<View>(null);
+  const { width: windowWidth } = useWindowDimensions();
   const [collectionStates, setCollectionStates] = useState<
     Record<PostCollectionKind, PostCollectionState>
   >(() => ({
@@ -629,6 +639,21 @@ function PlayerTabContent({
     [accessToken, updateCollectionState],
   );
 
+  const openPostFilter = useCallback(() => {
+    postFilterButtonRef.current?.measureInWindow((x, y, width, height) => {
+      setPostFilterAnchor({
+        right: Math.max(12, windowWidth - x - width),
+        top: y + height + 8,
+      });
+      setPostFilterOpen(true);
+    });
+  }, [windowWidth]);
+
+  const selectPostVisibilityFilter = useCallback((filter: PostVisibilityFilter) => {
+    setPostVisibilityFilter(filter);
+    setPostFilterOpen(false);
+  }, []);
+
   const deleteOwnedPost = useCallback(
     (socialPostId: string) => {
       if (!accessToken || deletingContentId) {
@@ -685,27 +710,73 @@ function PlayerTabContent({
     if (error && !content) {
       return <ContentError message={error} onRetry={onRetry} />;
     }
-    if (!content?.posts.length) {
-      return (
-        <ContentEmpty
-          icon="images-outline"
-          subtitle="发布到动态的内容会显示在这里"
-          title="还没有动态"
-        />
-      );
-    }
+
+    const posts = content?.posts ?? [];
+    const filteredPosts =
+      postVisibilityFilter === "all"
+        ? posts
+        : posts.filter((post) => post.visibility === postVisibilityFilter);
 
     return (
-      <View style={styles.contentGrid}>
-        {content.posts.map((post) => (
-          <ProfilePostTile
-            actionLabel="删除动态"
-            actionLoading={deletingContentId === post.social_post_id}
-            key={post.social_post_id}
-            onAction={() => deleteOwnedPost(post.social_post_id)}
-            post={post}
+      <View style={styles.postContent}>
+        <View style={styles.postContentHeader}>
+          <Text style={styles.postContentTitle}>动态</Text>
+          <View ref={postFilterButtonRef} collapsable={false}>
+            <Pressable
+              accessibilityHint="选择动态可见范围"
+              accessibilityLabel={
+                postVisibilityFilter === "all"
+                  ? "筛选动态"
+                  : `筛选动态，当前为${postVisibilityFilter === "public" ? "公开" : "私密"}`
+              }
+              accessibilityRole="button"
+              accessibilityState={{ expanded: postFilterOpen }}
+              onPress={openPostFilter}
+              style={[styles.postFilterButton, postVisibilityFilter !== "all" && styles.postFilterButtonActive]}
+            >
+              <Ionicons
+                color={postVisibilityFilter === "all" ? colors.ink : colors.accentDeep}
+                name={postVisibilityFilter === "all" ? "funnel-outline" : "funnel"}
+                size={18}
+              />
+              {postVisibilityFilter !== "all" ? <View style={styles.postFilterIndicator} /> : null}
+            </Pressable>
+          </View>
+        </View>
+
+        {posts.length === 0 ? (
+          <ContentEmpty
+            icon="images-outline"
+            subtitle="发布到动态的内容会显示在这里"
+            title="还没有动态"
           />
-        ))}
+        ) : filteredPosts.length === 0 ? (
+          <ContentEmpty
+            icon="funnel-outline"
+            subtitle="尝试切换其它可见范围"
+            title="没有符合条件的动态"
+          />
+        ) : (
+          <View style={styles.contentGrid}>
+            {filteredPosts.map((post) => (
+              <ProfilePostTile
+                actionLabel="删除动态"
+                actionLoading={deletingContentId === post.social_post_id}
+                key={post.social_post_id}
+                onAction={() => deleteOwnedPost(post.social_post_id)}
+                post={post}
+              />
+            ))}
+          </View>
+        )}
+
+        <PostVisibilityFilterPopover
+          anchor={postFilterAnchor}
+          onClose={() => setPostFilterOpen(false)}
+          onSelect={selectPostVisibilityFilter}
+          selected={postVisibilityFilter}
+          visible={postFilterOpen}
+        />
       </View>
     );
   }
@@ -828,6 +899,64 @@ function PlayerTabContent({
   }
 
   return null;
+}
+
+function PostVisibilityFilterPopover({
+  anchor,
+  onClose,
+  onSelect,
+  selected,
+  visible,
+}: {
+  anchor: PopoverAnchor | null;
+  onClose: () => void;
+  onSelect: (filter: PostVisibilityFilter) => void;
+  selected: PostVisibilityFilter;
+  visible: boolean;
+}) {
+  const options: { label: string; value: PostVisibilityFilter }[] = [
+    { label: "全部", value: "all" },
+    { label: "公开", value: "public" },
+    { label: "私密", value: "private" },
+  ];
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.postFilterBackdrop}>
+        <Pressable accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.postFilterPopover,
+            {
+              right: anchor?.right ?? 12,
+              top: anchor?.top ?? 64,
+            },
+          ]}
+        >
+          <Text style={styles.postFilterTitle}>动态状态</Text>
+          {options.map((option) => {
+            const isSelected = selected === option.value;
+            return (
+              <Pressable
+                accessibilityLabel={`${option.label}动态`}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                key={option.value}
+                onPress={() => onSelect(option.value)}
+                style={[styles.postFilterOption, isSelected && styles.postFilterOptionActive]}
+              >
+                <Text style={[styles.postFilterOptionText, isSelected && styles.postFilterOptionTextActive]}>
+                  {option.label}
+                </Text>
+                {isSelected ? <Ionicons color={colors.accentDeep} name="checkmark" size={18} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 function PostCollectionGrid({
@@ -1613,6 +1742,91 @@ const styles = StyleSheet.create({
   },
   playerTabTextActive: {
     color: colors.ink,
+  },
+  postContent: {
+    gap: 10,
+  },
+  postContentHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 38,
+  },
+  postContentTitle: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  postFilterButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: "center",
+    position: "relative",
+    width: 36,
+  },
+  postFilterButtonActive: {
+    backgroundColor: colors.accentSoft,
+    borderColor: "#D9E7EF",
+  },
+  postFilterIndicator: {
+    backgroundColor: colors.accentDeep,
+    borderColor: colors.surfaceWarm,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    height: 8,
+    position: "absolute",
+    right: 4,
+    top: 4,
+    width: 8,
+  },
+  postFilterBackdrop: {
+    flex: 1,
+  },
+  postFilterPopover: {
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    elevation: 8,
+    gap: 3,
+    minWidth: 152,
+    padding: 6,
+    position: "absolute",
+    shadowColor: colors.ink,
+    shadowOffset: { height: 6, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+  },
+  postFilterTitle: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  postFilterOption: {
+    alignItems: "center",
+    borderRadius: radius.small,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 42,
+    paddingHorizontal: 10,
+  },
+  postFilterOptionActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  postFilterOptionText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  postFilterOptionTextActive: {
+    color: colors.accentDeep,
   },
   contentGrid: {
     flexDirection: "row",
