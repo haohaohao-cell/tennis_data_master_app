@@ -311,14 +311,40 @@ function PlayerProfile({
         </View>
       </View>
 
-      <View style={styles.socialStats}>
-        <ProfileStat label="获赞" value={`${content?.stats.received_like_count ?? 0}`} />
-        <ProfileStat label="互关" value={`${content?.stats.friend_count ?? 0}`} />
-        <ProfileStat label="关注" value={`${content?.stats.following_count ?? 0}`} />
-        <ProfileStat label="粉丝" value={`${content?.stats.follower_count ?? 0}`} />
+      <View style={styles.socialOverview}>
+        <View style={styles.socialMetricGrid}>
+          <View style={styles.socialMetric}>
+            <View style={[styles.socialMetricIcon, styles.socialMetricIconLikes]}>
+              <Ionicons color={colors.clay} name="heart-outline" size={16} />
+            </View>
+            <Text style={styles.socialMetricValue}>{content?.stats.received_like_count ?? 0}</Text>
+            <Text style={styles.socialMetricLabel}>获赞</Text>
+          </View>
+          <View style={styles.socialMetric}>
+            <View style={[styles.socialMetricIcon, styles.socialMetricIconFriends]}>
+              <Ionicons color={colors.accentDeep} name="people-outline" size={16} />
+            </View>
+            <Text style={styles.socialMetricValue}>{content?.stats.friend_count ?? 0}</Text>
+            <Text style={styles.socialMetricLabel}>互关</Text>
+          </View>
+          <View style={styles.socialMetric}>
+            <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowing]}>
+              <Ionicons color={colors.gold} name="add-circle-outline" size={16} />
+            </View>
+            <Text style={styles.socialMetricValue}>{content?.stats.following_count ?? 0}</Text>
+            <Text style={styles.socialMetricLabel}>关注</Text>
+          </View>
+          <View style={styles.socialMetric}>
+            <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowers]}>
+              <Ionicons color={colors.sky} name="person-add-outline" size={16} />
+            </View>
+            <Text style={styles.socialMetricValue}>{content?.stats.follower_count ?? 0}</Text>
+            <Text style={styles.socialMetricLabel}>粉丝</Text>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.socialStats}>
+      <View style={styles.contentStats}>
         <ProfileStat label="动态" value={`${content?.stats.posts ?? 0}`} />
         <ProfileStat label="比赛" value={`${content?.stats.matches ?? 0}`} />
         <ProfileStat label="训练" value={`${content?.stats.training ?? 0}`} />
@@ -1694,7 +1720,54 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "900",
   },
-  socialStats: {
+  socialOverview: {
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  socialMetricGrid: {
+    flexDirection: "row",
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+  },
+  socialMetric: {
+    alignItems: "center",
+    flex: 1,
+    gap: 4,
+  },
+  socialMetricIcon: {
+    alignItems: "center",
+    borderRadius: radius.small,
+    height: 28,
+    justifyContent: "center",
+    marginBottom: 1,
+    width: 28,
+  },
+  socialMetricIconLikes: {
+    backgroundColor: colors.claySoft,
+  },
+  socialMetricIconFriends: {
+    backgroundColor: colors.accentSoft,
+  },
+  socialMetricIconFollowing: {
+    backgroundColor: colors.goldSoft,
+  },
+  socialMetricIconFollowers: {
+    backgroundColor: colors.skySoft,
+  },
+  socialMetricValue: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  socialMetricLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  contentStats: {
     backgroundColor: colors.surfaceWarm,
     borderColor: colors.line,
     borderRadius: radius.card,
