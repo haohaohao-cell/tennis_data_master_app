@@ -312,6 +312,13 @@ function PlayerProfile({
       </View>
 
       <View style={styles.socialStats}>
+        <ProfileStat label="获赞" value={`${content?.stats.received_like_count ?? 0}`} />
+        <ProfileStat label="互关" value={`${content?.stats.friend_count ?? 0}`} />
+        <ProfileStat label="关注" value={`${content?.stats.following_count ?? 0}`} />
+        <ProfileStat label="粉丝" value={`${content?.stats.follower_count ?? 0}`} />
+      </View>
+
+      <View style={styles.socialStats}>
         <ProfileStat label="动态" value={`${content?.stats.posts ?? 0}`} />
         <ProfileStat label="比赛" value={`${content?.stats.matches ?? 0}`} />
         <ProfileStat label="训练" value={`${content?.stats.training ?? 0}`} />
