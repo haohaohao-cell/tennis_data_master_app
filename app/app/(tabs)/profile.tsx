@@ -266,6 +266,19 @@ function PlayerProfile({
   const profileCompleted = Boolean(user?.profile_completed);
   const displayName = profileCompleted ? (user?.nickname ?? "网球用户") : "网球用户";
 
+  const openSocialList = useCallback(
+    (kind: "friends" | "following" | "followers") => {
+      if (!user?.user_id) {
+        return;
+      }
+      router.push({
+        pathname: "/friends/list",
+        params: { type: kind },
+      });
+    },
+    [router, user?.user_id],
+  );
+
   return (
     <View style={styles.profileBody}>
       <View style={styles.playerHeaderRow}>
@@ -320,27 +333,42 @@ function PlayerProfile({
             <Text style={styles.socialMetricValue}>{content?.stats.received_like_count ?? 0}</Text>
             <Text style={styles.socialMetricLabel}>获赞</Text>
           </View>
-          <View style={styles.socialMetric}>
+          <Pressable
+            accessibilityLabel="查看互关列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("friends")}
+            style={styles.socialMetric}
+          >
             <View style={[styles.socialMetricIcon, styles.socialMetricIconFriends]}>
               <Ionicons color={colors.accentDeep} name="people-outline" size={16} />
             </View>
             <Text style={styles.socialMetricValue}>{content?.stats.friend_count ?? 0}</Text>
             <Text style={styles.socialMetricLabel}>互关</Text>
-          </View>
-          <View style={styles.socialMetric}>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="查看关注列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("following")}
+            style={styles.socialMetric}
+          >
             <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowing]}>
               <Ionicons color={colors.gold} name="add-circle-outline" size={16} />
             </View>
             <Text style={styles.socialMetricValue}>{content?.stats.following_count ?? 0}</Text>
             <Text style={styles.socialMetricLabel}>关注</Text>
-          </View>
-          <View style={styles.socialMetric}>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="查看粉丝列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("followers")}
+            style={styles.socialMetric}
+          >
             <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowers]}>
               <Ionicons color={colors.sky} name="person-add-outline" size={16} />
             </View>
             <Text style={styles.socialMetricValue}>{content?.stats.follower_count ?? 0}</Text>
             <Text style={styles.socialMetricLabel}>粉丝</Text>
-          </View>
+          </Pressable>
         </View>
       </View>
 

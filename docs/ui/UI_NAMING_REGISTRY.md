@@ -173,6 +173,7 @@ app.post_detail.comments_panel
 | `app.profile.coach_workspace` | 教练工作台 | mode | 教练身份下的工作区 |
 | `app.profile.player_header` | 个人资料头部 | section | 头像、昵称、资料状态、教练入口 |
 | `app.profile.player_stats` | 数据统计区 | section | 动态、比赛、训练、课程统计 |
+| `app.profile.social_stats` | 社交统计区 | section | 获赞、互关、关注、粉丝统计，互关/关注/粉丝可点击 |
 | `app.profile.content_tabs` | 内容分类区 | section | 动态、比赛、训练、课程、收藏、赞过、数据 |
 | `app.profile.content_area` | 内容展示区 | section | 各 Tab 的内容结果区 |
 | `app.profile.profile_menu_drawer` | 功能菜单抽屉 | drawer | 右上角三横线打开的抽屉 |
@@ -291,6 +292,14 @@ app.post_detail.comments_panel
 | `app.friend_search.state_panel` | 状态区 | state | 未登录、搜索中、空结果、错误 |
 | `app.friend_search.result_list` | 搜索结果列表 | list | 球友结果列表 |
 | `app.friend_search.result_item` | 搜索结果项 | list_item | 单条用户结果 |
+
+## 关注 / 粉丝列表
+
+| ID | 中文名 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `app.friend_list` | 关注/粉丝列表页 | screen | 互关、关注、粉丝用户列表 |
+| `app.friend_list.user_list` | 用户列表 | list | 对应类型的用户列表 |
+| `app.friend_list.user_item` | 用户列表项 | list_item | 单条用户，含头像、昵称与关系操作 |
 
 ## 重要复用组件
 

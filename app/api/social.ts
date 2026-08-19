@@ -44,3 +44,38 @@ export function unfollowUser(accessToken: string, userId: string) {
     method: "DELETE",
   });
 }
+
+export type SocialUserSummary = {
+  user_id: string;
+  nickname: string;
+  avatar_path: string | null;
+  is_coach: boolean;
+  coach_status: string | null;
+};
+
+export type FollowListItem = {
+  user: SocialUserSummary;
+  is_friend: boolean;
+};
+
+export type FollowListKind = "followers" | "following" | "friends";
+
+export type FollowListResponse = {
+  items: FollowListItem[];
+  page: number;
+  page_size: number;
+};
+
+export function getFollowList(
+  kind: FollowListKind,
+  userId: string,
+  options: { page?: number; pageSize?: number } = {},
+) {
+  const params = new URLSearchParams({
+    page: String(options.page ?? 1),
+    page_size: String(options.pageSize ?? 20),
+  });
+  return apiRequest<FollowListResponse>(
+    `/api/v1/social/users/${userId}/${kind}?${params.toString()}`,
+  );
+}
