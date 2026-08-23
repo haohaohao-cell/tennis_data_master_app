@@ -96,6 +96,19 @@ export type PostFavoriteResponse = {
   success: boolean;
 };
 
+export type PostShareResponse = {
+  share: {
+    conversation_id: string | null;
+    created_at: string;
+    message_id: string | null;
+    post_share_id: string;
+    share_target_type: string;
+    social_post_id: string;
+  };
+  stats: PostStats;
+  success: boolean;
+};
+
 export type PostCommentRecord = {
   author: PostAuthor;
   author_user_id: string;
@@ -332,14 +345,41 @@ export function unfavoritePost(accessToken: string, socialPostId: string) {
   });
 }
 
+export function sharePost(
+  accessToken: string,
+  socialPostId: string,
+  payload: {
+    conversationId: string;
+    messageText?: string | null;
+  },
+) {
+  return apiRequest<PostShareResponse>(`/api/v1/posts/${socialPostId}/share`, {
+    accessToken,
+    body: {
+      conversation_id: payload.conversationId,
+      message_text: payload.messageText ?? null,
+      share_target_type: "conversation",
+    },
+    method: "POST",
+  });
+}
+
 export function listPostComments(
   socialPostId: string,
-  options: { accessToken?: string | null; page?: number; pageSize?: number } = {},
+  options: {
+    accessToken?: string | null;
+    page?: number;
+    pageSize?: number;
+    parentCommentId?: string | null;
+  } = {},
 ) {
   const params = new URLSearchParams({
     page: String(options.page ?? 1),
     page_size: String(options.pageSize ?? 30),
   });
+  if (options.parentCommentId) {
+    params.set("parent_comment_id", options.parentCommentId);
+  }
   return apiRequest<PostCommentListResponse>(
     `/api/v1/posts/${socialPostId}/comments?${params.toString()}`,
     { accessToken: options.accessToken },
@@ -360,5 +400,21 @@ export function createPostComment(
       source: "post_detail",
     },
     method: "POST",
+  });
+}
+
+export function deletePostComment(
+  accessToken: string,
+  socialPostId: string,
+  commentId: string,
+) {
+  return apiRequest<{
+    comment_id: string;
+    social_post_id: string;
+    stats: PostStats;
+    success: boolean;
+  }>(`/api/v1/posts/${socialPostId}/comments/${commentId}`, {
+    accessToken,
+    method: "DELETE",
   });
 }

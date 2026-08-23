@@ -78,6 +78,7 @@ app.post_detail.comments_panel
 | `app.home.feed_switcher` | 信息流切换区 | section | 推荐 / 关注 / 附近 |
 | `app.home.feed_list` | 动态流 | list | 首页主内容列表 |
 | `app.home.feed_card` | 动态卡片 | component | 信息流中的单条内容卡 |
+| `app.home.feed_card_video` | 卡片视频播放器 | component | 根据卡片可见程度自动播放当前中心视频，其他视频暂停 |
 | `app.home.nearby_filter_panel` | 附近筛选区 | panel | 附近信息流的城市 / 区域条件区 |
 | `app.home.loading_state` | 首页加载状态 | state | 首页首次加载或刷新中 |
 | `app.home.error_state` | 首页错误状态 | state | 首页内容加载失败时的可见状态 |
@@ -158,7 +159,6 @@ app.post_detail.comments_panel
 | --- | --- | --- | --- |
 | `app.messages` | 消息页 | screen | 消息中心主页面 |
 | `app.messages.view_switcher` | 消息视图切换区 | section | 通知 / 聊天 / 请求 |
-| `app.messages.notification_category_switcher` | 通知分类切换区 | section | 互动关注 / 课程系统 |
 | `app.messages.notification_list` | 通知列表 | list | 系统通知与互动通知 |
 | `app.messages.conversation_list` | 会话列表 | list | 私信和群聊会话 |
 | `app.messages.request_list` | 请求列表 | list | 消息请求列表 |
@@ -174,7 +174,6 @@ app.post_detail.comments_panel
 | `app.profile.coach_workspace` | 教练工作台 | mode | 教练身份下的工作区 |
 | `app.profile.player_header` | 个人资料头部 | section | 头像、昵称、资料状态、教练入口 |
 | `app.profile.player_stats` | 数据统计区 | section | 动态、比赛、训练、课程统计 |
-| `app.profile.social_stats` | 社交统计区 | section | 获赞、互关、关注、粉丝统计，互关/关注/粉丝可点击 |
 | `app.profile.content_tabs` | 内容分类区 | section | 动态、比赛、训练、课程、收藏、赞过、数据 |
 | `app.profile.content_area` | 内容展示区 | section | 各 Tab 的内容结果区 |
 | `app.profile.profile_menu_drawer` | 功能菜单抽屉 | drawer | 右上角三横线打开的抽屉 |
@@ -249,10 +248,13 @@ app.post_detail.comments_panel
 | ID | 中文名 | 类型 | 说明 |
 | --- | --- | --- | --- |
 | `app.post_detail` | 动态详情页 | screen | 单条动态详情页 |
+| `app.post_detail.video_stream` | 沉浸式视频流 | list | 全屏上下滑切换 Post 视频的连续流 |
 | `app.post_detail.media_stage` | 主展示区 | stage | 视频 / 封面主展示区 |
 | `app.post_detail.action_bar` | 互动操作区 | section | 点赞、收藏、评论等互动区 |
 | `app.post_detail.comments_panel` | 评论面板 | panel | 底部评论弹层 |
 | `app.post_detail.comment_composer` | 评论输入区 | section | 评论输入与发送区 |
+| `app.post_detail.comment_actions` | 评论操作区 | section | 回复、删除和加载更多评论操作 |
+| `app.post_detail.share_panel` | 站内分享面板 | panel | 选择站内会话并分享动态 |
 | `app.post_detail.loading_state` | 动态详情加载状态 | state | 详情加载中 |
 
 ## 用户主页
@@ -282,10 +284,6 @@ app.post_detail.comments_panel
 | `app.chat.header` | 会话头部 | section | 头像、会话名、返回区 |
 | `app.chat.message_timeline` | 消息时间线 | list | 历史消息与滚动加载 |
 | `app.chat.composer` | 输入区 | section | 文本输入与发送区 |
-| `app.chat.reply_composer_preview` | 回复预览区 | section | 当前回复目标、摘要与取消操作 |
-| `app.chat.quote_preview` | 引用预览 | component | 消息气泡中的引用摘要与定位入口 |
-| `app.chat.recall_action` | 撤回消息操作 | action | Direct 自有文字消息的撤回入口 |
-| `app.chat.recalled_tombstone` | 已撤回消息占位 | component | 撤回消息的中性展示 |
 | `app.chat.loading_state` | 聊天加载状态 | state | 会话加载中 |
 
 ## 球友搜索
@@ -297,14 +295,6 @@ app.post_detail.comments_panel
 | `app.friend_search.state_panel` | 状态区 | state | 未登录、搜索中、空结果、错误 |
 | `app.friend_search.result_list` | 搜索结果列表 | list | 球友结果列表 |
 | `app.friend_search.result_item` | 搜索结果项 | list_item | 单条用户结果 |
-
-## 关注 / 粉丝列表
-
-| ID | 中文名 | 类型 | 说明 |
-| --- | --- | --- | --- |
-| `app.friend_list` | 关注/粉丝列表页 | screen | 互关、关注、粉丝用户列表 |
-| `app.friend_list.user_list` | 用户列表 | list | 对应类型的用户列表 |
-| `app.friend_list.user_item` | 用户列表项 | list_item | 单条用户，含头像、昵称与关系操作 |
 
 ## 重要复用组件
 

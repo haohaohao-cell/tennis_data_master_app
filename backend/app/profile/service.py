@@ -285,62 +285,12 @@ def _select_lessons(connection: sqlite3.Connection, user_id: str) -> list[Profil
     return [ProfileContentLesson(**_row_dict(row)) for row in rows]
 
 
-def _select_social_stats(connection: sqlite3.Connection, user_id: str) -> tuple[int, int, int, int]:
-    row = connection.execute(
-        """
-        SELECT
-            COALESCE((
-                SELECT SUM(social_post_stats.like_count)
-                FROM social_posts
-                LEFT JOIN social_post_stats
-                    ON social_post_stats.social_post_id = social_posts.social_post_id
-                WHERE social_posts.author_user_id = ?
-                  AND social_posts.deleted_at IS NULL
-                  AND social_posts.status <> 'deleted'
-            ), 0) AS received_like_count,
-            (
-                SELECT COUNT(*)
-                FROM user_follows
-                WHERE follower_user_id = ?
-                  AND status = 'active'
-            ) AS following_count,
-            (
-                SELECT COUNT(*)
-                FROM user_follows
-                WHERE following_user_id = ?
-                  AND status = 'active'
-            ) AS follower_count,
-            (
-                SELECT COUNT(*)
-                FROM user_follows
-                JOIN user_follows AS reciprocal
-                    ON reciprocal.follower_user_id = user_follows.following_user_id
-                   AND reciprocal.following_user_id = user_follows.follower_user_id
-                   AND reciprocal.status = 'active'
-                WHERE user_follows.follower_user_id = ?
-                  AND user_follows.status = 'active'
-            ) AS friend_count;
-        """,
-        (user_id, user_id, user_id, user_id),
-    ).fetchone()
-    return (
-        int(row["received_like_count"]),
-        int(row["friend_count"]),
-        int(row["following_count"]),
-        int(row["follower_count"]),
-    )
-
-
 def get_profile_content(user_id: str) -> ProfileContentResponse:
     with get_connection() as connection:
         posts = _select_posts(connection, user_id)
         matches = _select_activities(connection, user_id, kind="matches")
         training = _select_activities(connection, user_id, kind="training")
         courses = _select_lessons(connection, user_id)
-        received_like_count, friend_count, following_count, follower_count = _select_social_stats(
-            connection,
-            user_id,
-        )
 
     return ProfileContentResponse(
         stats=ProfileContentStats(
@@ -348,10 +298,6 @@ def get_profile_content(user_id: str) -> ProfileContentResponse:
             matches=len(matches),
             training=len(training),
             courses=len(courses),
-            received_like_count=received_like_count,
-            friend_count=friend_count,
-            following_count=following_count,
-            follower_count=follower_count,
         ),
         posts=posts,
         matches=matches,

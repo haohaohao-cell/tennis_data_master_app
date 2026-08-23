@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { VideoView, useVideoPlayer, type VideoSource } from "expo-video";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -214,14 +215,18 @@ function previewUri(item: PostFeedItem) {
 export default function HomeScreen() {
   const router = useRouter();
   const requireAuth = useRequireAuth();
-  const { accessToken, isAuthenticated, status } = useAuth();
+  const { accessToken, clearExpiredLogin, isAuthenticated, status } = useAuth();
   const [activeFeed, setActiveFeed] = useState<FeedType>("recommended");
   const [feedStates, setFeedStates] = useState<Record<FeedType, FeedTabState>>(createFeedStates);
   const [feedState, setFeedState] = useState<PostFeedState | null>(null);
   const [nearbyDraft, setNearbyDraft] = useState({ city: "", region: "" });
   const [nearbyQuery, setNearbyQuery] = useState({ city: "", region: "" });
   const [nearbyLocating, setNearbyLocating] = useState(false);
+  const [activeAutoplayPostId, setActiveAutoplayPostId] = useState<string | null>(null);
   const [pendingInteractionIds, setPendingInteractionIds] = useState<string[]>([]);
+  const activePostIdRef = useRef<string | null>(null);
+  const viewTimeStartRef = useRef<Record<string, number>>({});
+  const viewTimeAccumRef = useRef<Record<string, number>>({});
   const pendingViewIdsRef = useRef<Set<string>>(new Set());
   const reportedViewIdsRef = useRef<Set<string>>(new Set());
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -245,7 +250,15 @@ export default function HomeScreen() {
     setFeedStates(createFeedStates());
     pendingViewIdsRef.current.clear();
     reportedViewIdsRef.current.clear();
+    viewTimeStartRef.current = {};
+    viewTimeAccumRef.current = {};
+    activePostIdRef.current = null;
   }, [accessToken]);
+
+  useEffect(() => {
+    activePostIdRef.current = null;
+    setActiveAutoplayPostId(null);
+  }, [activeFeed]);
 
   const updateFeedState = useCallback(
     (
@@ -325,6 +338,21 @@ export default function HomeScreen() {
           strategyVersion: response.strategy_version,
         }));
       } catch (loadError) {
+        if (loadError instanceof ApiError && loadError.status === 401) {
+          await clearExpiredLogin();
+          router.replace({
+            pathname: "/login",
+            params: { redirect: "/(tabs)" },
+          });
+          updateFeedState(feedType, (current) => ({
+            ...current,
+            loaded: true,
+            loading: false,
+            loadingMore: false,
+            refreshing: false,
+          }));
+          return;
+        }
         updateFeedState(feedType, (current) => ({
           ...current,
           error: feedErrorMessage(loadError),
@@ -335,7 +363,16 @@ export default function HomeScreen() {
         }));
       }
     },
-    [accessToken, feedStates, nearbyQuery.city, nearbyQuery.region, status, updateFeedState],
+    [
+      accessToken,
+      clearExpiredLogin,
+      feedStates,
+      nearbyQuery.city,
+      nearbyQuery.region,
+      router,
+      status,
+      updateFeedState,
+    ],
   );
 
   useEffect(() => {
@@ -363,13 +400,19 @@ export default function HomeScreen() {
     try {
       const response = await reportPostViews(accessToken, {
         items: ids.map((socialPostId) => ({
-          dwell_time_ms: 0,
+          dwell_time_ms:
+            (viewTimeAccumRef.current[socialPostId] ?? 0) +
+            (viewTimeStartRef.current[socialPostId]
+              ? Math.max(0, Date.now() - viewTimeStartRef.current[socialPostId])
+              : 0),
           social_post_id: socialPostId,
           source: "home_feed",
         })),
       });
       for (const id of response.accepted_post_ids) {
         reportedViewIdsRef.current.add(id);
+        delete viewTimeStartRef.current[id];
+        delete viewTimeAccumRef.current[id];
       }
     } catch {
       for (const id of ids) {
@@ -409,6 +452,21 @@ export default function HomeScreen() {
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken<PostFeedItem>[] }) => {
+      const nextActiveId = viewableItems[0]?.item?.post.social_post_id ?? null;
+      const previousActiveId = activePostIdRef.current;
+      if (nextActiveId && nextActiveId !== previousActiveId) {
+        if (previousActiveId && viewTimeStartRef.current[previousActiveId]) {
+          viewTimeAccumRef.current[previousActiveId] =
+            (viewTimeAccumRef.current[previousActiveId] ?? 0) +
+            Math.max(0, Date.now() - viewTimeStartRef.current[previousActiveId]);
+          delete viewTimeStartRef.current[previousActiveId];
+        }
+        activePostIdRef.current = nextActiveId;
+        setActiveAutoplayPostId(nextActiveId);
+        if (!viewTimeStartRef.current[nextActiveId]) {
+          viewTimeStartRef.current[nextActiveId] = Date.now();
+        }
+      }
       if (!canReportViewsRef.current) {
         return;
       }
@@ -434,30 +492,39 @@ export default function HomeScreen() {
 
   const handleSubmitNearby = useCallback(async () => {
     setNearbyLocating(true);
-    const nextLocation = await getCurrentActivityLocation();
-    setNearbyLocating(false);
-    const { city, region } = coarseLocationFromActivityLocation(nextLocation.location);
-    setNearbyDraft({ city, region });
-    if (!city && !region) {
-      Alert.alert("无法获取附近范围", nextLocation.message ?? "附近内容只使用城市或地区，不读取精确坐标。");
-      return;
+    try {
+      const nextLocation = await getCurrentActivityLocation();
+      const { city, region } = coarseLocationFromActivityLocation(nextLocation.location);
+      setNearbyDraft({ city, region });
+      if (!city && !region) {
+        Alert.alert("无法获取附近范围", nextLocation.message ?? "附近内容只使用城市或地区，不读取精确坐标。");
+        return;
+      }
+      setNearbyQuery({ city, region });
+      updateFeedState("nearby", createFeedState());
+      setActiveFeed("nearby");
+    } catch {
+      Alert.alert("无法获取附近范围", "定位暂时不可用，请稍后重试。");
+    } finally {
+      setNearbyLocating(false);
     }
-    setNearbyQuery({ city, region });
-    updateFeedState("nearby", createFeedState());
-    setActiveFeed("nearby");
   }, [updateFeedState]);
 
   const openPost = useCallback(
     (item: PostFeedItem, focusComments = false) => {
       primePostDetailPreview(item);
+      const streamIds = currentState.items
+        .map((feedItem) => feedItem.post.social_post_id)
+        .filter(Boolean)
+        .join(",");
       router.push({
         pathname: "/post/[id]",
         params: focusComments
-          ? { focus: "comments", id: item.post.social_post_id }
-          : { id: item.post.social_post_id },
+          ? { focus: "comments", id: item.post.social_post_id, streamIds }
+          : { id: item.post.social_post_id, streamIds },
       });
     },
-    [router],
+    [currentState.items, router],
   );
 
   const handleOpenAuthor = useCallback(
@@ -566,6 +633,7 @@ export default function HomeScreen() {
   const renderItem = useCallback(
     ({ item }: { item: PostFeedItem }) => (
       <PostCard
+        active={activeAutoplayPostId === item.post.social_post_id}
         item={item}
         interactionPending={pendingInteractionIds.includes(item.post.social_post_id)}
         onOpen={() => openPost(item)}
@@ -583,6 +651,7 @@ export default function HomeScreen() {
       handleToggleLike,
       openPost,
       pendingInteractionIds,
+      activeAutoplayPostId,
     ],
   );
 
@@ -844,6 +913,7 @@ function StatePanel({
 }
 
 function PostCard({
+  active,
   interactionPending,
   item,
   onOpen,
@@ -853,6 +923,7 @@ function PostCard({
   onToggleFavorite,
   onToggleLike,
 }: {
+  active: boolean;
   interactionPending: boolean;
   item: PostFeedItem;
   onOpen: () => void;
@@ -863,7 +934,8 @@ function PostCard({
   onToggleLike: () => void;
 }) {
   const preview = previewUri(item);
-  const firstVideo = item.videos[0];
+  const firstVideo = item.videos.find((video) => video.upload_status === "uploaded") ?? null;
+  const videoUri = firstVideo ? resolveMediaUrl(firstVideo.video_path) : null;
   const stats = item.stats;
   const hasSourceActivity = Boolean(item.post.source_tennis_activity_id);
   const liked = Boolean(item.viewer_state?.is_liked);
@@ -898,24 +970,38 @@ function PostCard({
         </Pressable>
       </View>
 
-      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.openPostArea}>
-        {preview ? (
-          <MediaImage ratio={1.46} source={{ uri: preview }} />
-        ) : (
-          <View style={styles.videoPlaceholder}>
-            <Ionicons color={colors.accentDeep} name="videocam-outline" size={30} />
-            <Text style={styles.videoPlaceholderTitle}>
-              {firstVideo?.original_filename || item.media[0]?.caption || "视频动态"}
-            </Text>
-            <Text style={styles.videoPlaceholderText}>
-              {formatDuration(firstVideo?.video_duration_ms)}
-            </Text>
-          </View>
-        )}
+      <View style={styles.openPostArea}>
+        <View style={styles.mediaTapArea}>
+          {videoUri ? (
+            <HomeVideoPreview active={active} posterUri={preview} videoUri={videoUri} />
+          ) : preview ? (
+            <MediaImage ratio={1.46} source={{ uri: preview }} />
+          ) : (
+            <View style={styles.videoPlaceholder}>
+              <Ionicons color={colors.accentDeep} name="videocam-outline" size={30} />
+              <Text style={styles.videoPlaceholderTitle}>
+                {firstVideo?.original_filename || item.media[0]?.caption || "视频动态"}
+              </Text>
+              <Text style={styles.videoPlaceholderText}>
+                {formatDuration(firstVideo?.video_duration_ms)}
+              </Text>
+            </View>
+          )}
+          <Pressable
+            accessibilityLabel="打开动态详情"
+            accessibilityRole="button"
+            onPress={onOpen}
+            style={styles.mediaOpenOverlay}
+          />
+        </View>
 
-        {item.post.title ? <Text style={styles.postTitle}>{item.post.title}</Text> : null}
-        {item.post.content ? <Text style={styles.postContent}>{item.post.content}</Text> : null}
-      </Pressable>
+        {item.post.title || item.post.content ? (
+          <Pressable accessibilityRole="button" onPress={onOpen} style={styles.textOpenArea}>
+            {item.post.title ? <Text style={styles.postTitle}>{item.post.title}</Text> : null}
+            {item.post.content ? <Text style={styles.postContent}>{item.post.content}</Text> : null}
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.postActions}>
         <StatItem
@@ -953,6 +1039,64 @@ function PostCard({
         ) : null}
       </View>
     </Card>
+  );
+}
+
+function HomeVideoPreview({
+  active,
+  posterUri,
+  videoUri,
+}: {
+  active: boolean;
+  posterUri: string | null;
+  videoUri: string;
+}) {
+  const source = useMemo<VideoSource>(() => ({ uri: videoUri }), [videoUri]);
+  const [ready, setReady] = useState(false);
+  const player = useVideoPlayer(source, (instance) => {
+    instance.loop = true;
+    instance.muted = true;
+  });
+
+  const pausePlayer = useCallback(() => {
+    void Promise.resolve()
+      .then(() => player.pause())
+      .catch(() => undefined);
+  }, [player]);
+
+  useEffect(() => {
+    if (active) {
+      player.play();
+      return;
+    }
+    pausePlayer();
+  }, [active, pausePlayer, player]);
+
+  useEffect(() => {
+    return () => {
+      pausePlayer();
+    };
+  }, [pausePlayer]);
+
+  return (
+    <View style={styles.cardVideoFrame}>
+      {posterUri && !ready ? (
+        <MediaImage ratio={1.46} source={{ uri: posterUri }} />
+      ) : null}
+      <VideoView
+        contentFit="cover"
+        nativeControls={false}
+        onFirstFrameRender={() => setReady(true)}
+        player={player}
+        pointerEvents="none"
+        style={[styles.cardVideo, !ready && styles.cardVideoHidden]}
+      />
+      {!active ? (
+        <View style={styles.cardVideoPausedBadge}>
+          <Ionicons color={colors.inverse} name="play" size={16} />
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -1102,6 +1246,18 @@ const styles = StyleSheet.create({
   openPostArea: {
     gap: 12,
   },
+  mediaTapArea: {
+    position: "relative",
+    width: "100%",
+  },
+  mediaOpenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    elevation: 3,
+    zIndex: 3,
+  },
+  textOpenArea: {
+    gap: 12,
+  },
   postHeader: {
     alignItems: "center",
     flexDirection: "row",
@@ -1160,6 +1316,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 4,
+  },
+  cardVideoFrame: {
+    aspectRatio: 1.46,
+    backgroundColor: "#050607",
+    borderRadius: radius.card,
+    overflow: "hidden",
+    position: "relative",
+    width: "100%",
+  },
+  cardVideo: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  cardVideoHidden: {
+    opacity: 0,
+  },
+  cardVideoPausedBadge: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.42)",
+    borderRadius: 19,
+    height: 38,
+    justifyContent: "center",
+    left: "50%",
+    marginLeft: -19,
+    marginTop: -19,
+    position: "absolute",
+    top: "50%",
+    width: 38,
   },
   postTitle: {
     color: colors.ink,

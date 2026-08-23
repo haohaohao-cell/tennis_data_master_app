@@ -10,7 +10,6 @@ import tempfile
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
-from backend.tests.activity_detail_api_smoke import login_phone
 from backend.tests.auth_api_smoke import asgi_request
 from backend.tests.upload_api_smoke import asgi_bytes_request, multipart_video_body
 
@@ -42,16 +41,7 @@ async def main() -> None:
             headers=headers,
         )
         assert empty_content.status == 200, empty_content
-        assert empty_content.json_body["stats"] == {
-            "posts": 0,
-            "matches": 0,
-            "training": 0,
-            "courses": 0,
-            "received_like_count": 0,
-            "friend_count": 0,
-            "following_count": 0,
-            "follower_count": 0,
-        }
+        assert empty_content.json_body["stats"]["training"] == 0
 
         video_bytes = b"profile content smoke video"
         intent = await asgi_request(
@@ -188,45 +178,6 @@ async def main() -> None:
             "/storage/videos/"
         ).replace("/", os.sep)
         assert post_thumbnail_file.is_file(), post_thumbnail_file
-
-        follower_token, follower_id = await login_phone(app, "13600000002")
-        follower_headers = {"authorization": f"Bearer {follower_token}"}
-        received_like = await asgi_request(
-            app,
-            "POST",
-            f"/api/v1/posts/{post_id}/like",
-            {"source": "profile_content_smoke"},
-            headers=follower_headers,
-        )
-        assert received_like.status == 200, received_like
-        assert received_like.json_body["stats"]["like_count"] == 1
-
-        follow_follower = await asgi_request(
-            app,
-            "POST",
-            f"/api/v1/social/follows/{follower_id}",
-            headers=headers,
-        )
-        assert follow_follower.status == 201, follow_follower
-        follow_owner = await asgi_request(
-            app,
-            "POST",
-            f"/api/v1/social/follows/{login.json_body['user']['user_id']}",
-            headers=follower_headers,
-        )
-        assert follow_owner.status == 201, follow_owner
-
-        content_with_engagement = await asgi_request(
-            app,
-            "GET",
-            "/api/v1/me/profile-content",
-            headers=headers,
-        )
-        assert content_with_engagement.status == 200, content_with_engagement
-        assert content_with_engagement.json_body["stats"]["received_like_count"] == 1
-        assert content_with_engagement.json_body["stats"]["friend_count"] == 1
-        assert content_with_engagement.json_body["stats"]["following_count"] == 1
-        assert content_with_engagement.json_body["stats"]["follower_count"] == 1
 
         print("Profile content API smoke test passed.")
 

@@ -10,26 +10,16 @@ from backend.app.messages import service
 from backend.app.messages.schemas import (
     ConversationCreateResponse,
     ConversationListResponse,
-    ConversationMessageSearchResponse,
-    ConversationHideResponse,
-    ConversationMuteResponse,
-    ConversationPinResponse,
     DirectConversationCreate,
     GroupConversationCreate,
-    MarkReadRequest,
     MarkReadResponse,
     MessageCreate,
     MessageListResponse,
-    MessageReconcileRequest,
-    MessageReconcileResponse,
     MessageRequestActionResponse,
     MessageRequestCreate,
     MessageRequestListResponse,
     MessageSendResponse,
     NotificationListResponse,
-    NotificationPreferencePatch,
-    NotificationPreferences,
-    NotificationProductCategory,
     UnreadCountsResponse,
 )
 
@@ -109,102 +99,6 @@ def list_conversations(
     return service.list_conversations(current_user.user_id, page, page_size)
 
 
-@router.get("/messages/conversations/search", response_model=ConversationListResponse)
-def search_conversations(
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-    q: Annotated[str, Query()],
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=50)] = 30,
-) -> ConversationListResponse:
-    return service.search_conversations(current_user.user_id, q, page, page_size)
-
-
-@router.post(
-    "/messages/conversations/{conversation_id}/pin",
-    response_model=ConversationPinResponse,
-)
-def pin_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationPinResponse:
-    return service.set_conversation_pin(current_user.user_id, conversation_id, True)
-
-
-@router.delete(
-    "/messages/conversations/{conversation_id}/pin",
-    response_model=ConversationPinResponse,
-)
-def unpin_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationPinResponse:
-    return service.set_conversation_pin(current_user.user_id, conversation_id, False)
-
-
-@router.post(
-    "/messages/conversations/{conversation_id}/mute",
-    response_model=ConversationMuteResponse,
-)
-def mute_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationMuteResponse:
-    return service.set_conversation_mute(current_user.user_id, conversation_id, True)
-
-
-@router.delete(
-    "/messages/conversations/{conversation_id}/mute",
-    response_model=ConversationMuteResponse,
-)
-def unmute_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationMuteResponse:
-    return service.set_conversation_mute(current_user.user_id, conversation_id, False)
-
-
-@router.post(
-    "/messages/conversations/{conversation_id}/hide",
-    response_model=ConversationHideResponse,
-)
-def hide_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationHideResponse:
-    return service.set_conversation_hidden(current_user.user_id, conversation_id, True)
-
-
-@router.delete(
-    "/messages/conversations/{conversation_id}/hide",
-    response_model=ConversationHideResponse,
-)
-def unhide_conversation(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> ConversationHideResponse:
-    return service.set_conversation_hidden(current_user.user_id, conversation_id, False)
-
-
-@router.get(
-    "/messages/conversations/{conversation_id}/messages/search",
-    response_model=ConversationMessageSearchResponse,
-)
-def search_conversation_messages(
-    conversation_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-    q: Annotated[str, Query()],
-    page_size: Annotated[int, Query(ge=1, le=100)] = 30,
-    before_seq: Annotated[int | None, Query(ge=1)] = None,
-) -> ConversationMessageSearchResponse:
-    return service.search_conversation_messages(
-        current_user.user_id,
-        conversation_id,
-        q,
-        page_size,
-        before_seq,
-    )
-
-
 @router.get(
     "/messages/conversations/{conversation_id}/messages",
     response_model=MessageListResponse,
@@ -216,18 +110,6 @@ def list_messages(
     before_seq: Annotated[int | None, Query(ge=1)] = None,
 ) -> MessageListResponse:
     return service.list_messages(current_user.user_id, conversation_id, page_size, before_seq)
-
-
-@router.post(
-    "/messages/conversations/{conversation_id}/messages/reconcile",
-    response_model=MessageReconcileResponse,
-)
-def reconcile_messages(
-    conversation_id: str,
-    payload: MessageReconcileRequest,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> MessageReconcileResponse:
-    return service.reconcile_messages(current_user.user_id, conversation_id, payload)
 
 
 @router.post(
@@ -244,27 +126,14 @@ def send_message(
 
 
 @router.post(
-    "/messages/conversations/{conversation_id}/messages/{message_id}/recall",
-    response_model=MessageSendResponse,
-)
-def recall_message(
-    conversation_id: str,
-    message_id: str,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> MessageSendResponse:
-    return service.recall_message(current_user.user_id, conversation_id, message_id)
-
-
-@router.post(
     "/messages/conversations/{conversation_id}/read",
     response_model=MarkReadResponse,
 )
 def mark_conversation_read(
     conversation_id: str,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
-    payload: MarkReadRequest | None = None,
 ) -> MarkReadResponse:
-    return service.mark_conversation_read(current_user.user_id, conversation_id, payload)
+    return service.mark_conversation_read(current_user.user_id, conversation_id)
 
 
 @router.get("/messages/unread-counts", response_model=UnreadCountsResponse)
@@ -280,7 +149,6 @@ def list_notifications(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
     category: Annotated[str | None, Query(max_length=30)] = None,
-    product_category: Annotated[NotificationProductCategory | None, Query()] = None,
     unread_only: Annotated[bool, Query()] = False,
 ) -> NotificationListResponse:
     return service.list_notifications(
@@ -288,24 +156,8 @@ def list_notifications(
         page,
         page_size,
         category,
-        product_category,
         unread_only,
     )
-
-
-@router.get("/notifications/preferences", response_model=NotificationPreferences)
-def get_notification_preferences(
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> NotificationPreferences:
-    return service.get_notification_preferences(current_user.user_id)
-
-
-@router.patch("/notifications/preferences", response_model=NotificationPreferences)
-def update_notification_preferences(
-    payload: NotificationPreferencePatch,
-    current_user: Annotated[UserPublic, Depends(get_current_user)],
-) -> NotificationPreferences:
-    return service.update_notification_preferences(current_user.user_id, payload)
 
 
 @router.post("/notifications/{user_notification_id}/read")

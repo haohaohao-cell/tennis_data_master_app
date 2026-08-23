@@ -160,6 +160,14 @@ export function captureError(error: unknown, context: DiagnosticContext) {
   if (mode === "off") {
     return null;
   }
+  const errorStatus =
+    error && typeof error === "object" && "status" in error
+      ? Number((error as { status?: unknown }).status)
+      : undefined;
+  const status = context.status ?? errorStatus;
+  if (status === 401 || status === 403) {
+    return null;
+  }
 
   const parts = errorParts(error);
   const baseEvent = {

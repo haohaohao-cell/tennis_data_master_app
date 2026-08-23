@@ -14,7 +14,7 @@
 ## 一、使用原则
 
 1. 同一数据项在数据库、后端 DTO、前端类型、App 模型、CV 输出和接口文档中必须使用同一个字段名。
-2. 当前核心落库字段以 `users`、`coach_applications`、`coach_profiles`、`admin_users`、`admin_credentials`、`auth_identities`、`auth_sessions`、`auth_verification_codes`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`social_post_stats`、`post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`post_media`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_notification_preferences`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports`、`points`、`shots` 为准。
+2. 当前核心落库字段以 `users`、`coach_applications`、`coach_profiles`、`admin_users`、`admin_credentials`、`auth_identities`、`auth_sessions`、`auth_verification_codes`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`social_post_stats`、`post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`post_media`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports`、`points`、`shots` 为准。
 3. Web 看板指标、趋势、诊断、视频片段、可视化点和明细页计算字段，除非出现在四张核心表中，否则均为 `非落库字段`。
 4. `非落库字段` 可以由数据库字段、`frame_data.jsonl`、算法结果或接口聚合计算得到，不要求第一版新增数据库列。
 5. `NULL` 表示未采集、未标注、不适用或历史数据缺失；`unknown` 表示已完成分析但无法可靠分类。
@@ -30,7 +30,7 @@
 | 认证、登录身份、会话与后台权限 | 落库 | `users`、`admin_users`、`admin_credentials`、`auth_identities`、`auth_sessions`、`auth_verification_codes` | App 内部用户、后台管理员授权、后台登录凭据、手机号/微信/Apple 等登录身份、设备会话和验证码记录 |
 | 教练身份申请与资料 | 落库 | `coach_applications`、`coach_profiles`、`users` | 普通用户申请认证教练或非职业教练，管理员审核后生成或更新用户扩展教练身份 |
 | 用户、活动、课程、视频与动态 | 落库 | `users`、`lessons`、`lesson_students`、`tennis_activities`、`videos`、`video_shares`、`social_posts`、`social_post_stats`、`post_media` | 用户身份、个人活动、课程关系、原始视频资产、分享、动态和动态统计 |
-| 社交关系、内容流行为、聊天与通知 | 落库 | `post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_notification_preferences`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports` | Post 点赞/收藏/评论/分享、关注/互关、拉黑、隐私、Push 投递偏好、浏览/隐藏、私信、群聊、陌生人消息请求、未读计数、通知事件、用户通知收件箱和举报 |
+| 社交关系、内容流行为、聊天与通知 | 落库 | `post_reactions`、`post_favorites`、`post_comments`、`post_shares`、`user_follows`、`user_social_stats`、`user_blocks`、`user_privacy_settings`、`user_post_views`、`user_post_hides`、`chat_conversations`、`chat_conversation_members`、`chat_messages`、`chat_message_attachments`、`chat_message_requests`、`notification_events`、`user_notifications`、`user_inbox_counters`、`content_reports` | Post 点赞/收藏/评论/分享、关注/互关、拉黑、隐私、浏览/隐藏、私信、群聊、陌生人消息请求、未读计数、通知事件、用户通知收件箱和举报 |
 | 分与击球事实 | 落库 | `points`、`shots` | 每分、每拍、触球、落点、结果、置信度 |
 | 逐帧 CV 数据 | 文件持久化 | `frame_data.jsonl` | 每帧检测、跟踪、单应矩阵、球员位置、CV 置信度 |
 | 统计指标 | 非落库字段 | API 聚合结果 | Web/App 看板和历史趋势使用 |
@@ -831,21 +831,18 @@ player_b_name = "训练对手"
 | `chat_message_attachments` | `attachment_id`、`message_id`、`attachment_type`、`media_path`、`thumbnail_path`、`mime_type`、`file_size_bytes`、`duration_ms`、`width_px`、`height_px`、`object_type`、`object_id`、`payload_json`、`sort_order` |
 | `chat_message_requests` | `message_request_id`、`requester_user_id`、`recipient_user_id`、`conversation_id`、`status`、`request_message`、`source`、`requested_at`、`responded_at`、`created_at`、`updated_at` |
 
-`reply_to_message_id` 可选引用同一会话中仍可用的消息；消息接口额外返回非持久化的 `reply_preview`，用于在原消息不在当前分页时安全展示引用。预览的 `state` 为 `available` 或 `unavailable`，不可用时不暴露删除、撤回或权限原因。Direct 文字消息撤回使用现有 `status = 'revoked'`，保留消息行、`message_seq`、`sent_at` 和已读/未读水位；用户侧序列化会清空撤回消息的内容、payload、业务对象引用、附件和 active reply preview，历史搜索仅返回 `status = 'sent'` 的文本。`client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
+`client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
 
 陌生人消息请求在 `status = pending` 时 `(requester_user_id, recipient_user_id)` 唯一。接受请求后创建或复用双方 direct conversation，并把 `conversation_id` 写回请求记录。
 
-### 12. `notification_events`、`user_notifications`、`user_inbox_counters`、`user_notification_preferences` 与 `content_reports` 通知和治理表
+### 12. `notification_events`、`user_notifications`、`user_inbox_counters` 与 `content_reports` 通知和治理表
 
 `notification_events` 保存一次业务事件，`user_notifications` 保存具体接收人的展示、已读和删除状态。通知对象通过多态对象字段引用 `social_posts`、`videos`、`tennis_activities`、`lessons` 等业务对象，不把业务逻辑写入通知表。
-
-`user_notification_preferences` 保存未来系统 Push 的用户级投递偏好。六项布尔字段默认均为 `true`；没有偏好行的用户也按全开处理。该表不控制站内通知记录、未读计数、徽标、私信权限或消息请求权限。
 
 | 表 | 关键字段 |
 | --- | --- |
 | `notification_events` | `notification_event_id`、`event_type`、`category`、`actor_user_id`、`object_type`、`object_id`、`context_type`、`context_id`、`title`、`body`、`deep_link`、`payload_json`、`dedup_key`、`aggregation_key`、`created_at` |
 | `user_notifications` | `user_notification_id`、`notification_event_id`、`recipient_user_id`、`status`、`priority`、`delivered_at`、`seen_at`、`read_at`、`dismissed_at`、`created_at`、`updated_at`、`deleted_at` |
-| `user_notification_preferences` | `user_id`、`direct_message_notifications`、`message_request_notifications`、`like_comment_notifications`、`follow_notifications`、`course_notifications`、`ai_analysis_notifications`、`created_at`、`updated_at` |
 | `user_inbox_counters` | `user_id`、`unread_direct_message_count`、`unread_group_message_count`、`unread_notification_count`、`updated_at` |
 | `content_reports` | `content_report_id`、`reporter_user_id`、`target_type`、`target_id`、`reason_type`、`reason_text`、`source`、`status`、`reviewer_user_id`、`reviewed_at`、`resolution_note`、`created_at`、`updated_at` |
 

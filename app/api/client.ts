@@ -170,7 +170,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (!response.ok) {
     const apiError = await parseError(response, { method, path, url });
-    if (shouldCaptureDiagnostics) {
+    const isAuthExpiredError = response.status === 401 || response.status === 403;
+    if (shouldCaptureDiagnostics && !isAuthExpiredError) {
       captureError(apiError, {
         apiBaseUrl: API_BASE_URL,
         body: options.body,

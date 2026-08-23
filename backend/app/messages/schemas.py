@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
-from pydantic_core import PydanticCustomError
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ConversationType = Literal["direct", "group"]
@@ -26,236 +25,6 @@ MessageType = Literal[
 AttachmentType = Literal["image", "video", "audio", "file", "object_card", "data_card", "link"]
 ObjectType = Literal["user", "video", "social_post", "tennis_activity", "lesson", "analysis", "custom"]
 NotificationCategory = Literal["interaction", "system", "ai", "coach", "lesson"]
-NotificationEventType = Literal[
-    "follow",
-    "post_like",
-    "post_comment",
-    "comment_reply",
-    "mention",
-    "video_shared",
-    "ai_analysis_completed",
-    "lesson_created",
-    "lesson_updated",
-    "coach_application_reviewed",
-    "system_announcement",
-    "custom",
-]
-NotificationType = Literal[
-    "follow",
-    "post_like",
-    "post_comment",
-    "comment_reply",
-    "mention",
-    "video_shared",
-    "ai_analysis_completed",
-    "lesson_created",
-    "lesson_updated",
-    "coach_application_reviewed",
-    "system_announcement",
-    "message_request",
-    "custom",
-]
-NotificationProductCategory = Literal["interaction_follow", "course_system", "request"]
-NotificationPreferenceKind = Literal[
-    "direct_message",
-    "message_request",
-    "like_comment",
-    "follow",
-    "course",
-    "ai_analysis",
-]
-MessagingPushKind = Literal["direct_message", "message_request", "notification_event"]
-MessagingPushDeliveryDecision = Literal[
-    "eligible",
-    "suppressed_by_preference",
-    "suppressed_by_conversation_mute",
-    "eligible_without_preference_mapping",
-    "invalid_target",
-    "unsupported",
-]
-NotificationTargetType = Literal[
-    "user_profile",
-    "post_detail",
-    "post_comments",
-    "message_request",
-    "chat",
-    "activity_detail",
-    "lesson_detail",
-    "coach_identity",
-    "none",
-]
-
-
-class UserProfileNotificationTarget(BaseModel):
-    type: Literal["user_profile"]
-    user_id: str
-
-
-class PostDetailNotificationTarget(BaseModel):
-    type: Literal["post_detail"]
-    post_id: str
-
-
-class PostCommentsNotificationTarget(BaseModel):
-    type: Literal["post_comments"]
-    post_id: str
-
-
-class MessageRequestNotificationTarget(BaseModel):
-    type: Literal["message_request"]
-    request_id: str | None = None
-
-
-class ChatNotificationTarget(BaseModel):
-    type: Literal["chat"]
-    conversation_id: str
-
-
-class ActivityDetailNotificationTarget(BaseModel):
-    type: Literal["activity_detail"]
-    activity_id: str
-
-
-class LessonDetailNotificationTarget(BaseModel):
-    type: Literal["lesson_detail"]
-    lesson_id: str
-
-
-class CoachIdentityNotificationTarget(BaseModel):
-    type: Literal["coach_identity"]
-
-
-class NoNotificationTarget(BaseModel):
-    type: Literal["none"]
-
-
-NotificationTarget = Annotated[
-    UserProfileNotificationTarget
-    | PostDetailNotificationTarget
-    | PostCommentsNotificationTarget
-    | MessageRequestNotificationTarget
-    | ChatNotificationTarget
-    | ActivityDetailNotificationTarget
-    | LessonDetailNotificationTarget
-    | CoachIdentityNotificationTarget
-    | NoNotificationTarget,
-    Field(discriminator="type"),
-]
-
-
-class MessagingPushDisplay(BaseModel):
-    title: str | None = None
-    body: str | None = None
-
-
-class DirectMessagePushData(BaseModel):
-    type: Literal["direct_message"]
-    message_id: str
-    sender_user_id: str
-
-
-class MessageRequestPushData(BaseModel):
-    type: Literal["message_request"]
-    request_id: str
-    requester_user_id: str
-
-
-class NotificationEventPushData(BaseModel):
-    type: Literal["notification_event"]
-    notification_event_id: str
-    actor_user_id: str | None = None
-
-
-class DirectMessagePushDeliveryRequest(BaseModel):
-    push_kind: Literal["direct_message"]
-    recipient_user_id: str
-    delivery_id: str
-    preference_kind: Literal["direct_message"]
-    notification_type: None = None
-    target: ChatNotificationTarget
-    display: MessagingPushDisplay
-    data: DirectMessagePushData
-
-
-class MessageRequestPushDeliveryRequest(BaseModel):
-    push_kind: Literal["message_request"]
-    recipient_user_id: str
-    delivery_id: str
-    preference_kind: Literal["message_request"]
-    notification_type: Literal["message_request"]
-    target: MessageRequestNotificationTarget
-    display: MessagingPushDisplay
-    data: MessageRequestPushData
-
-
-class NotificationEventPushDeliveryRequest(BaseModel):
-    push_kind: Literal["notification_event"]
-    recipient_user_id: str
-    delivery_id: str
-    preference_kind: NotificationPreferenceKind | None = None
-    notification_type: NotificationEventType
-    target: NotificationTarget
-    display: MessagingPushDisplay
-    data: NotificationEventPushData
-
-
-MessagingPushDeliveryRequest = Annotated[
-    DirectMessagePushDeliveryRequest
-    | MessageRequestPushDeliveryRequest
-    | NotificationEventPushDeliveryRequest,
-    Field(discriminator="push_kind"),
-]
-
-
-class MessagingPushIntent(BaseModel):
-    decision: MessagingPushDeliveryDecision
-    request: MessagingPushDeliveryRequest | None = None
-
-
-class NotificationPreferences(BaseModel):
-    direct_message_notifications: bool = True
-    message_request_notifications: bool = True
-    like_comment_notifications: bool = True
-    follow_notifications: bool = True
-    course_notifications: bool = True
-    ai_analysis_notifications: bool = True
-
-
-class NotificationPreferencePatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    direct_message_notifications: StrictBool | None = None
-    message_request_notifications: StrictBool | None = None
-    like_comment_notifications: StrictBool | None = None
-    follow_notifications: StrictBool | None = None
-    course_notifications: StrictBool | None = None
-    ai_analysis_notifications: StrictBool | None = None
-
-    @field_validator(
-        "direct_message_notifications",
-        "message_request_notifications",
-        "like_comment_notifications",
-        "follow_notifications",
-        "course_notifications",
-        "ai_analysis_notifications",
-    )
-    @classmethod
-    def require_boolean(cls, value: bool | None) -> bool:
-        if value is None:
-            raise PydanticCustomError(
-                "notification_preference_boolean",
-                "Notification preference values must be boolean.",
-            )
-        return value
-
-    @model_validator(mode="after")
-    def require_update(self) -> "NotificationPreferencePatch":
-        if not self.model_fields_set:
-            raise PydanticCustomError(
-                "notification_preference_empty",
-                "At least one notification preference is required.",
-            )
-        return self
 
 
 def _strip_text(value: str | None) -> str | None:
@@ -398,7 +167,6 @@ class ConversationMemberRecord(BaseModel):
     last_read_at: str | None = None
     unread_count: int
     muted_until: str | None = None
-    is_muted: bool = False
     pinned_at: str | None = None
     archived_at: str | None = None
 
@@ -421,17 +189,6 @@ class MessageAttachmentRecord(BaseModel):
     created_at: str
 
 
-class MessageReplyPreview(BaseModel):
-    """A privacy-safe, server-hydrated summary of a referenced message."""
-
-    state: Literal["available", "unavailable"]
-    message_id: str
-    message_seq: int | None = None
-    sender_user_id: str | None = None
-    sender_nickname: str | None = None
-    text_content: str | None = None
-
-
 class ChatMessageRecord(BaseModel):
     message_id: str
     conversation_id: str
@@ -446,7 +203,6 @@ class ChatMessageRecord(BaseModel):
     context_object_type: ObjectType | None = None
     context_object_id: str | None = None
     reply_to_message_id: str | None = None
-    reply_preview: MessageReplyPreview | None = None
     client_message_id: str | None = None
     status: str
     sent_at: str
@@ -469,55 +225,9 @@ class ConversationListResponse(BaseModel):
     page_size: int
 
 
-class ConversationPinResponse(BaseModel):
-    success: bool
-    conversation_id: str
-    pinned_at: str | None = None
-
-
-class ConversationMuteResponse(BaseModel):
-    success: bool
-    conversation_id: str
-    muted_until: str | None = None
-    is_muted: bool
-
-
-class ConversationHideResponse(BaseModel):
-    success: bool
-    conversation_id: str
-    archived_at: str | None = None
-    is_hidden: bool
-
-
-class DirectConversationInteractionState(BaseModel):
-    can_send: bool
-    blocked_by_current_user: bool
-
-
 class MessageListResponse(BaseModel):
     items: list[ChatMessageRecord]
     conversation_id: str
-    next_before_seq: int | None = None
-    # Direct-chat sender receipts derive from the other member's server watermark.
-    # Group chats deliberately return null and do not expose single-recipient semantics.
-    other_member_last_read_message_seq: int | None = None
-    direct_interaction_state: DirectConversationInteractionState | None = None
-
-
-class MessageReconcileRequest(BaseModel):
-    """Persisted message IDs already rendered by the client and needing freshness."""
-
-    message_ids: list[str] = Field(min_length=1, max_length=500)
-
-
-class MessageReconcileResponse(BaseModel):
-    conversation_id: str
-    items: list[ChatMessageRecord] = Field(default_factory=list)
-
-
-class ConversationMessageSearchResponse(BaseModel):
-    conversation_id: str
-    items: list[ChatMessageRecord]
     next_before_seq: int | None = None
 
 
@@ -565,31 +275,19 @@ class MarkReadResponse(BaseModel):
     success: bool
     conversation_id: str
     unread_count: int
-    last_read_message_seq: int
-
-
-class MarkReadRequest(BaseModel):
-    """Bound the read update to messages the client actually reconciled."""
-
-    through_message_seq: int = Field(ge=0)
 
 
 class UnreadCountsResponse(BaseModel):
     unread_direct_message_count: int
     unread_group_message_count: int
     unread_notification_count: int
-    pending_message_request_count: int
     total_unread_count: int
-    messages_tab_badge_count: int
 
 
 class NotificationEventRecord(BaseModel):
     notification_event_id: str
-    event_type: NotificationEventType
-    notification_type: NotificationType
+    event_type: str
     category: NotificationCategory
-    product_category: NotificationProductCategory
-    target: NotificationTarget
     actor_user_id: str | None = None
     object_type: str | None = None
     object_id: str | None = None

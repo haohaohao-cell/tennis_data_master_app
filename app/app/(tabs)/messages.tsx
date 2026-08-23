@@ -2,29 +2,21 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { resolveMediaUrl } from "@/api/activityDetail";
 import { ApiError } from "@/api/client";
-import { resolveNotificationRoute } from "@/api/messageNotificationRoute";
 import {
   acceptMessageRequest,
   declineMessageRequest,
-  hideConversation,
   listConversations,
   listMessageRequests,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
-  muteConversation,
-  pinConversation,
-  searchConversations,
   type ConversationListItem,
   type MessageRequestRecord,
-  type NotificationProductCategory,
   type UserNotificationRecord,
-  unpinConversation,
-  unmuteConversation,
 } from "@/api/messages";
 import { useAuth } from "@/auth/AuthProvider";
 import { useRequireAuth } from "@/auth/useRequireAuth";
@@ -32,22 +24,11 @@ import { Avatar, Card, IconBadge, ScrollPage, SegmentedControl, TopBar } from "@
 import { colors, radius } from "@/theme";
 
 type MessageView = "notice" | "chat" | "request";
-type NotificationViewCategory = Exclude<NotificationProductCategory, "request">;
-type LoadDataOptions = { silent?: boolean; queueIfInFlight?: boolean };
-type LoadNotificationCategoryOptions = { showLoading?: boolean };
-type RequestPendingAction = { id: string; action: "accept" | "decline" };
-
-const MESSAGES_POLL_INTERVAL_MS = 8000;
 
 const messageOptions = [
   { label: "通知", value: "notice" },
   { label: "聊天", value: "chat" },
   { label: "请求", value: "request" },
-] as const;
-
-const notificationCategoryOptions = [
-  { label: "互动关注", value: "interaction_follow" },
-  { label: "课程系统", value: "course_system" },
 ] as const;
 
 function readableMessageError(error: unknown) {
@@ -124,91 +105,45 @@ export default function MessagesScreen() {
   const requireAuth = useRequireAuth();
   const { accessToken, status } = useAuth();
   const [activeView, setActiveView] = useState<MessageView>("notice");
-  const [activeNotificationCategory, setActiveNotificationCategory] =
-    useState<NotificationViewCategory>("interaction_follow");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
-  const [conversationSearchMode, setConversationSearchMode] = useState(false);
-  const [conversationSearchQuery, setConversationSearchQuery] = useState("");
-  const [submittedConversationSearchQuery, setSubmittedConversationSearchQuery] = useState("");
-  const [conversationSearchResults, setConversationSearchResults] = useState<ConversationListItem[]>([]);
-  const [conversationSearchPage, setConversationSearchPage] = useState<number | null>(null);
-  const [conversationSearchLoading, setConversationSearchLoading] = useState(false);
-  const [conversationSearchLoadingMore, setConversationSearchLoadingMore] = useState(false);
-  const [conversationSearchError, setConversationSearchError] = useState<string | null>(null);
-  const [conversationSearchCompleted, setConversationSearchCompleted] = useState(false);
   const [notifications, setNotifications] = useState<UserNotificationRecord[]>([]);
   const [requests, setRequests] = useState<MessageRequestRecord[]>([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [notificationCategoryLoading, setNotificationCategoryLoading] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
-  const [requestAction, setRequestAction] = useState<RequestPendingAction | null>(null);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [markingAllRead, setMarkingAllRead] = useState(false);
-  const [conversationMutationIds, setConversationMutationIds] = useState<Set<string>>(new Set());
-  const requestActionInFlightRef = useRef<string | null>(null);
-  const handledRequestIdsRef = useRef<Set<string>>(new Set());
   const loadRequestIdRef = useRef(0);
-  const refreshInFlightRef = useRef(false);
-  const refreshQueuedRef = useRef(false);
-  const screenFocusedRef = useRef(false);
-  const notificationMutationGenerationRef = useRef(0);
-  const notificationCategoryRef = useRef<NotificationViewCategory>("interaction_follow");
-  const notificationCategoryGenerationRef = useRef(0);
-  const notificationCategoryRequestIdRef = useRef(0);
-  const loadDataRef = useRef<(options?: LoadDataOptions) => Promise<void>>(async () => undefined);
-  const conversationMutationInFlightRef = useRef<Set<string>>(new Set());
-  const conversationSearchRequestIdRef = useRef(0);
-  const conversationSearchPaginationInFlightRef = useRef(false);
 
   const canLoad = status === "authenticated" && Boolean(accessToken);
 
-  const loadData = useCallback(async ({ silent = false, queueIfInFlight = true }: LoadDataOptions = {}) => {
+  const loadData = useCallback(async () => {
     if (status === "loading") {
       return;
     }
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     if (!accessToken) {
-      refreshQueuedRef.current = false;
-      notificationCategoryRequestIdRef.current += 1;
       setConversations([]);
       setNotifications([]);
       setRequests([]);
       setNotificationUnreadCount(0);
-      setNotificationCategoryLoading(false);
       setConversationError(null);
       setNotificationError(null);
       setRequestError(null);
-      return;
-    }
-    if (silent && (!screenFocusedRef.current || AppState.currentState !== "active")) {
-      return;
-    }
-    if (refreshInFlightRef.current) {
-      if (queueIfInFlight) {
-        refreshQueuedRef.current = true;
-      }
       return;
     }
 
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-    const notificationRequestId = notificationCategoryRequestIdRef.current + 1;
-    notificationCategoryRequestIdRef.current = notificationRequestId;
-    const notificationMutationGeneration = notificationMutationGenerationRef.current;
-    const notificationCategory = notificationCategoryRef.current;
-    const notificationCategoryGeneration = notificationCategoryGenerationRef.current;
-    refreshInFlightRef.current = true;
-    if (!silent) {
-      setLoading(true);
-      setConversationError(null);
-      setNotificationError(null);
-      setRequestError(null);
-    }
+    setLoading(true);
+    setConversationError(null);
+    setNotificationError(null);
+    setRequestError(null);
     try {
       const [conversationResult, notificationResult, requestResult] = await Promise.allSettled([
         listConversations(accessToken, 1, 30),
-        listNotifications(accessToken, { pageSize: 30, productCategory: notificationCategory }),
+        listNotifications(accessToken, { pageSize: 30 }),
         listMessageRequests(accessToken, "inbox", { pageSize: 30, status: "pending" }),
       ]);
       if (loadRequestIdRef.current !== requestId) {
@@ -216,317 +151,47 @@ export default function MessagesScreen() {
       }
       if (conversationResult.status === "fulfilled") {
         setConversations(conversationResult.value.items);
-        setConversationError(null);
-      } else if (!silent) {
+      } else {
         setConversationError(readableMessageError(conversationResult.reason));
       }
-      if (
-        notificationResult.status === "fulfilled" &&
-        notificationCategoryRequestIdRef.current === notificationRequestId &&
-        notificationMutationGenerationRef.current === notificationMutationGeneration &&
-        notificationCategoryGenerationRef.current === notificationCategoryGeneration &&
-        notificationCategoryRef.current === notificationCategory
-      ) {
+      if (notificationResult.status === "fulfilled") {
         setNotifications(notificationResult.value.items);
         setNotificationUnreadCount(notificationResult.value.unread_count);
-        setNotificationError(null);
-      } else if (
-        notificationResult.status === "rejected" &&
-        !silent &&
-        notificationCategoryRequestIdRef.current === notificationRequestId &&
-        notificationCategoryGenerationRef.current === notificationCategoryGeneration &&
-        notificationCategoryRef.current === notificationCategory
-      ) {
+      } else {
         setNotificationError(readableMessageError(notificationResult.reason));
       }
       if (requestResult.status === "fulfilled") {
-        setRequests(requestResult.value.items.filter((item) => !handledRequestIdsRef.current.has(item.message_request_id)));
-        setRequestError(null);
-      } else if (!silent) {
+        setRequests(requestResult.value.items);
+      } else {
         setRequestError(readableMessageError(requestResult.reason));
       }
     } catch (loadError) {
       if (loadRequestIdRef.current !== requestId) {
         return;
       }
-      if (!silent) {
-        const nextError = readableMessageError(loadError);
-        setConversationError(nextError);
-        setNotificationError(nextError);
-        setRequestError(nextError);
-      }
+      const nextError = readableMessageError(loadError);
+      setConversationError(nextError);
+      setNotificationError(nextError);
+      setRequestError(nextError);
     } finally {
-      if (!silent) {
+      if (loadRequestIdRef.current === requestId) {
         setLoading(false);
-      }
-      if (
-        notificationCategoryRequestIdRef.current === notificationRequestId &&
-        notificationCategoryGenerationRef.current === notificationCategoryGeneration &&
-        notificationCategoryRef.current === notificationCategory
-      ) {
-        setNotificationCategoryLoading(false);
-      }
-      refreshInFlightRef.current = false;
-      if (refreshQueuedRef.current && screenFocusedRef.current && AppState.currentState === "active") {
-        refreshQueuedRef.current = false;
-        void loadDataRef.current({ silent: true });
-      }
-    }
-  }, [accessToken, status]);
-  loadDataRef.current = loadData;
-
-  const handleConversationPin = useCallback(
-    (conversationId: string, currentlyPinned: boolean) => {
-      if (!accessToken || status !== "authenticated") {
-        return;
-      }
-      if (conversationMutationInFlightRef.current.has(conversationId)) {
-        return;
-      }
-
-      conversationMutationInFlightRef.current.add(conversationId);
-      setConversationMutationIds((current) => new Set(current).add(conversationId));
-      // Invalidate any older list response so it cannot overwrite a successful mutation.
-      loadRequestIdRef.current += 1;
-      const mutation = currentlyPinned
-        ? unpinConversation(accessToken, conversationId)
-        : pinConversation(accessToken, conversationId);
-      void mutation
-        .then((response) => {
-          setConversations((current) =>
-            current.map((item) =>
-              item.conversation.conversation_id === conversationId
-                ? { ...item, member: { ...item.member, pinned_at: response.pinned_at } }
-                : item,
-            ),
-          );
-          void loadDataRef.current({ silent: true });
-        })
-        .catch((mutationError) => {
-          Alert.alert("操作失败", readableMessageError(mutationError));
-          void loadDataRef.current({ silent: true });
-        })
-        .finally(() => {
-          conversationMutationInFlightRef.current.delete(conversationId);
-          setConversationMutationIds((current) => {
-            const next = new Set(current);
-            next.delete(conversationId);
-            return next;
-          });
-        });
-    },
-    [accessToken, status],
-  );
-
-  const handleConversationMute = useCallback(
-    (conversationId: string, currentlyMuted: boolean) => {
-      if (!accessToken || status !== "authenticated") {
-        return;
-      }
-      if (conversationMutationInFlightRef.current.has(conversationId)) {
-        return;
-      }
-
-      conversationMutationInFlightRef.current.add(conversationId);
-      setConversationMutationIds((current) => new Set(current).add(conversationId));
-      // Invalidate any older list response so it cannot overwrite a successful mutation.
-      loadRequestIdRef.current += 1;
-      const mutation = currentlyMuted
-        ? unmuteConversation(accessToken, conversationId)
-        : muteConversation(accessToken, conversationId);
-      void mutation
-        .then((response) => {
-          setConversations((current) =>
-            current.map((item) =>
-              item.conversation.conversation_id === conversationId
-                ? {
-                    ...item,
-                    member: {
-                      ...item.member,
-                      is_muted: response.is_muted,
-                      muted_until: response.muted_until,
-                    },
-                  }
-                : item,
-            ),
-          );
-          void loadDataRef.current({ silent: true });
-        })
-        .catch((mutationError) => {
-          Alert.alert("操作失败", readableMessageError(mutationError));
-          void loadDataRef.current({ silent: true });
-        })
-        .finally(() => {
-          conversationMutationInFlightRef.current.delete(conversationId);
-          setConversationMutationIds((current) => {
-            const next = new Set(current);
-            next.delete(conversationId);
-            return next;
-          });
-        });
-    },
-    [accessToken, status],
-  );
-
-  const handleConversationHide = useCallback(
-    (conversationId: string) => {
-      if (!accessToken || status !== "authenticated" || conversationMutationInFlightRef.current.has(conversationId)) {
-        return;
-      }
-      Alert.alert("隐藏聊天？", "聊天记录不会删除。有新消息时会重新显示。", [
-        { text: "取消", style: "cancel" },
-        {
-          text: "隐藏",
-          style: "destructive",
-          onPress: () => {
-            if (conversationMutationInFlightRef.current.has(conversationId)) {
-              return;
-            }
-            conversationMutationInFlightRef.current.add(conversationId);
-            setConversationMutationIds((current) => new Set(current).add(conversationId));
-            // Invalidate any older list response so it cannot restore a hidden row.
-            loadRequestIdRef.current += 1;
-            void hideConversation(accessToken, conversationId)
-              .then(() => {
-                setConversations((current) =>
-                  current.filter((item) => item.conversation.conversation_id !== conversationId),
-                );
-                void loadDataRef.current({ silent: true });
-              })
-              .catch((mutationError) => {
-                Alert.alert("操作失败", readableMessageError(mutationError));
-                void loadDataRef.current({ silent: true });
-              })
-              .finally(() => {
-                conversationMutationInFlightRef.current.delete(conversationId);
-                setConversationMutationIds((current) => {
-                  const next = new Set(current);
-                  next.delete(conversationId);
-                  return next;
-                });
-              });
-          },
-        },
-      ]);
-    },
-    [accessToken, status],
-  );
-
-  const loadNotificationCategory = useCallback(async (
-    category: NotificationViewCategory,
-    { showLoading = true }: LoadNotificationCategoryOptions = {},
-  ) => {
-    if (!accessToken || status !== "authenticated") {
-      return;
-    }
-    const requestId = notificationCategoryRequestIdRef.current + 1;
-    notificationCategoryRequestIdRef.current = requestId;
-    const categoryGeneration = notificationCategoryGenerationRef.current;
-    const mutationGeneration = notificationMutationGenerationRef.current;
-    if (showLoading) {
-      setNotificationCategoryLoading(true);
-      setNotificationError(null);
-    }
-    try {
-      const response = await listNotifications(accessToken, { pageSize: 30, productCategory: category });
-      if (
-        notificationCategoryRequestIdRef.current !== requestId ||
-        notificationCategoryGenerationRef.current !== categoryGeneration ||
-        notificationCategoryRef.current !== category ||
-        !screenFocusedRef.current
-      ) {
-        return;
-      }
-      if (notificationMutationGenerationRef.current !== mutationGeneration) {
-        void loadDataRef.current({ silent: true });
-        return;
-      }
-      setNotifications(response.items);
-      setNotificationUnreadCount(response.unread_count);
-      setNotificationError(null);
-    } catch (categoryError) {
-      if (
-        notificationCategoryRequestIdRef.current === requestId &&
-        notificationCategoryGenerationRef.current === categoryGeneration &&
-        notificationCategoryRef.current === category &&
-        screenFocusedRef.current
-      ) {
-        setNotificationError(readableMessageError(categoryError));
-      }
-    } finally {
-      if (
-        notificationCategoryRequestIdRef.current === requestId &&
-        notificationCategoryGenerationRef.current === categoryGeneration &&
-        notificationCategoryRef.current === category
-      ) {
-        setNotificationCategoryLoading(false);
       }
     }
   }, [accessToken, status]);
 
   useFocusEffect(
     useCallback(() => {
-      screenFocusedRef.current = true;
       void loadData();
-      let pollTimer: ReturnType<typeof setInterval> | null = null;
-      let focused = true;
-
-      const stopPolling = () => {
-        if (pollTimer !== null) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      };
-      const startPolling = () => {
-        stopPolling();
-        if (!focused || AppState.currentState !== "active" || !accessToken || status !== "authenticated") {
-          return;
-        }
-        pollTimer = setInterval(() => {
-          void loadData({ silent: true });
-        }, MESSAGES_POLL_INTERVAL_MS);
-      };
-      const handleAppStateChange = (nextState: string) => {
-        if (nextState === "active") {
-          void loadData({ silent: true });
-          startPolling();
-        } else {
-          refreshQueuedRef.current = false;
-          stopPolling();
-        }
-      };
-
-      startPolling();
-      const appStateSubscription = AppState.addEventListener("change", handleAppStateChange);
       return () => {
-        focused = false;
-        screenFocusedRef.current = false;
-        refreshQueuedRef.current = false;
-        stopPolling();
-        appStateSubscription.remove();
         loadRequestIdRef.current += 1;
-        notificationCategoryRequestIdRef.current += 1;
       };
-    }, [accessToken, loadData, status]),
+    }, [loadData]),
   );
 
   const openLogin = useCallback(() => {
     requireAuth("登录后可以查看通知、聊天和消息请求", "/(tabs)/messages");
   }, [requireAuth]);
-
-  const handleNotificationCategoryChange = useCallback((category: NotificationViewCategory) => {
-    if (notificationCategoryRef.current === category) {
-      return;
-    }
-    notificationCategoryRef.current = category;
-    notificationCategoryGenerationRef.current += 1;
-    setActiveNotificationCategory(category);
-    setNotifications([]);
-    setNotificationError(null);
-    if (screenFocusedRef.current && AppState.currentState === "active") {
-      void loadNotificationCategory(category);
-    }
-  }, [loadNotificationCategory]);
 
   const openFriendSearch = useCallback(() => {
     if (!requireAuth("登录后可以搜索并添加球友", "/(tabs)/messages")) {
@@ -535,95 +200,13 @@ export default function MessagesScreen() {
     router.push("/friends/search");
   }, [requireAuth, router]);
 
-  const openCreateGroup = useCallback(() => {
-    if (!requireAuth("登录后可以创建群聊", "/(tabs)/messages")) {
-      return;
-    }
-    router.push("/messages/create-group");
-  }, [requireAuth, router]);
-
-  const runConversationSearch = useCallback((page = 1, append = false) => {
-    const query = (append ? submittedConversationSearchQuery : conversationSearchQuery).trim();
-    if (!accessToken || !query) {
-      if (!append) {
-        setConversationSearchError("请输入要搜索的聊天名称。");
-        setConversationSearchCompleted(false);
-      }
-      return;
-    }
-    if (append && conversationSearchPaginationInFlightRef.current) {
-      return;
-    }
-
-    const requestId = conversationSearchRequestIdRef.current + 1;
-    conversationSearchRequestIdRef.current = requestId;
-    if (append) {
-      conversationSearchPaginationInFlightRef.current = true;
-      setConversationSearchLoadingMore(true);
-    } else {
-      conversationSearchPaginationInFlightRef.current = false;
-      setSubmittedConversationSearchQuery(query);
-      setConversationSearchResults([]);
-      setConversationSearchPage(null);
-      setConversationSearchError(null);
-      setConversationSearchCompleted(false);
-      setConversationSearchLoading(true);
-    }
-
-    void searchConversations(accessToken, query, { page, pageSize: 30 })
-      .then((response) => {
-        if (conversationSearchRequestIdRef.current !== requestId) {
-          return;
-        }
-        setConversationSearchResults((current) => (append ? [...current, ...response.items] : response.items));
-        setConversationSearchPage(response.items.length === response.page_size ? response.page + 1 : null);
-        setConversationSearchCompleted(true);
-      })
-      .catch((searchError) => {
-        if (conversationSearchRequestIdRef.current === requestId) {
-          setConversationSearchError(readableMessageError(searchError));
-          setConversationSearchCompleted(true);
-        }
-      })
-      .finally(() => {
-        if (conversationSearchRequestIdRef.current === requestId) {
-          setConversationSearchLoading(false);
-          setConversationSearchLoadingMore(false);
-          if (append) {
-            conversationSearchPaginationInFlightRef.current = false;
-          }
-        }
-      });
-  }, [accessToken, conversationSearchQuery, submittedConversationSearchQuery]);
-
-  const openConversationSearch = useCallback(() => {
-    setConversationSearchMode(true);
-    setConversationSearchQuery("");
-    setSubmittedConversationSearchQuery("");
-    setConversationSearchResults([]);
-    setConversationSearchPage(null);
-    setConversationSearchError(null);
-    setConversationSearchCompleted(false);
-  }, []);
-
-  const closeConversationSearch = useCallback(() => {
-    conversationSearchRequestIdRef.current += 1;
-    conversationSearchPaginationInFlightRef.current = false;
-    setConversationSearchMode(false);
-    setConversationSearchLoading(false);
-    setConversationSearchLoadingMore(false);
-    setConversationSearchError(null);
-  }, []);
-
   const markAllRead = useCallback(() => {
     if (!accessToken || markingAllRead || notificationUnreadCount === 0) {
       return;
     }
-    notificationMutationGenerationRef.current += 1;
     setMarkingAllRead(true);
     void markAllNotificationsRead(accessToken)
       .then(() => {
-        notificationMutationGenerationRef.current += 1;
         setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })));
         setNotificationUnreadCount(0);
       })
@@ -633,45 +216,24 @@ export default function MessagesScreen() {
 
   const handleRequestAction = useCallback(
     (item: MessageRequestRecord, action: "accept" | "decline") => {
-      if (!accessToken || requestActionInFlightRef.current) {
+      if (!accessToken || requestActionId) {
         return;
       }
-      requestActionInFlightRef.current = item.message_request_id;
-      setRequestAction({ id: item.message_request_id, action });
+      setRequestActionId(item.message_request_id);
       const request = action === "accept"
         ? acceptMessageRequest(accessToken, item.message_request_id)
         : declineMessageRequest(accessToken, item.message_request_id);
       void request
         .then((response) => {
-          handledRequestIdsRef.current.add(item.message_request_id);
           setRequests((current) => current.filter((requestItem) => requestItem.message_request_id !== item.message_request_id));
           if (action === "accept" && response.conversation) {
-            void loadData({ silent: true });
-            const conversationTitle = response.other_members[0]?.nickname ?? response.conversation.title ?? "聊天";
-            router.push({
-              pathname: "/chat/[id]",
-              params: {
-                avatar: response.other_members[0]?.avatar_path ?? response.conversation.avatar_path ?? "",
-                id: response.conversation.conversation_id,
-                name: conversationTitle,
-              },
-            });
+            void loadData();
           }
         })
         .catch((actionError) => Alert.alert("处理失败", readableMessageError(actionError)))
-        .finally(() => {
-          requestActionInFlightRef.current = null;
-          setRequestAction(null);
-        });
+        .finally(() => setRequestActionId(null));
     },
-    [accessToken, loadData, router],
-  );
-
-  const visibleMessageOptions = useMemo(
-    () => messageOptions.map((option) => option.value === "request" && requests.length > 0
-      ? { ...option, label: `请求 (${requests.length})` }
-      : option),
-    [requests.length],
+    [accessToken, loadData, requestActionId],
   );
 
   const rightAction = useMemo(() => {
@@ -692,26 +254,6 @@ export default function MessagesScreen() {
             )}
           </Pressable>
         ) : null}
-        {activeView === "chat" ? (
-          <Pressable
-            accessibilityLabel="搜索聊天"
-            accessibilityRole="button"
-            onPress={openConversationSearch}
-            style={styles.topAction}
-          >
-            <Ionicons color={colors.ink} name="search" size={19} />
-          </Pressable>
-        ) : null}
-        {activeView === "chat" ? (
-          <Pressable
-            accessibilityLabel="创建群聊"
-            accessibilityRole="button"
-            onPress={openCreateGroup}
-            style={styles.topAction}
-          >
-            <Ionicons color={colors.ink} name="people-outline" size={19} />
-          </Pressable>
-        ) : null}
         <Pressable
           accessibilityLabel="添加球友"
           accessibilityRole="button"
@@ -722,7 +264,7 @@ export default function MessagesScreen() {
         </Pressable>
       </View>
     );
-  }, [accessToken, activeView, markAllRead, markingAllRead, notificationUnreadCount, openConversationSearch, openCreateGroup, openFriendSearch]);
+  }, [accessToken, activeView, markAllRead, markingAllRead, notificationUnreadCount, openFriendSearch]);
 
   const activeViewHasItems = useMemo(() => {
     if (activeView === "notice") {
@@ -744,35 +286,13 @@ export default function MessagesScreen() {
     return requestError;
   }, [activeView, conversationError, notificationError, requestError]);
 
-  const retryActiveView = useCallback(() => {
-    if (activeView === "notice") {
-      void loadNotificationCategory(notificationCategoryRef.current);
-      return;
-    }
-    void loadData();
-  }, [activeView, loadData, loadNotificationCategory]);
-
   const showActiveError = Boolean(activeError && !activeViewHasItems);
-  const showActiveLoading = (loading || (activeView === "notice" && notificationCategoryLoading))
-    && !activeViewHasItems
-    && !showActiveError;
-  const notificationEmptyMessage = activeNotificationCategory === "interaction_follow"
-    ? "暂无互动关注通知。"
-    : "暂无课程系统通知。";
+  const showActiveLoading = loading && !activeViewHasItems && !showActiveError;
 
   return (
     <ScrollPage bottomInset={112}>
       <TopBar right={rightAction} title="消息" />
-      <SegmentedControl options={visibleMessageOptions} value={activeView} onChange={setActiveView} />
-      {activeView === "notice" ? (
-        <View style={styles.notificationCategoryControl}>
-          <SegmentedControl
-            options={[...notificationCategoryOptions]}
-            value={activeNotificationCategory}
-            onChange={handleNotificationCategoryChange}
-          />
-        </View>
-      ) : null}
+      <SegmentedControl options={[...messageOptions]} value={activeView} onChange={setActiveView} />
 
       {status === "loading" ? <StateBlock loading message="正在恢复登录状态..." /> : null}
       {status !== "loading" && !canLoad ? (
@@ -787,21 +307,18 @@ export default function MessagesScreen() {
         <>
           {showActiveLoading ? <StateBlock loading message="正在加载消息..." /> : null}
           {showActiveError ? (
-            <StateBlock actionLabel="重试" icon="refresh-outline" message={activeError ?? "消息数据加载失败，请稍后重试。"} onAction={retryActiveView} />
+            <StateBlock actionLabel="重试" icon="refresh-outline" message={activeError ?? "消息数据加载失败，请稍后重试。"} onAction={loadData} />
           ) : null}
           {!showActiveLoading && !showActiveError && activeView === "notice" ? (
             <NotificationList
-              emptyMessage={notificationEmptyMessage}
               items={notifications}
               onOpenNotification={(item) => {
                 if (!accessToken) {
                   return;
                 }
                 if (!item.read_at) {
-                  notificationMutationGenerationRef.current += 1;
                   void markNotificationRead(accessToken, item.user_notification_id)
                     .then(() => {
-                      notificationMutationGenerationRef.current += 1;
                       setNotifications((current) =>
                         current.map((notification) =>
                           notification.user_notification_id === item.user_notification_id
@@ -813,50 +330,33 @@ export default function MessagesScreen() {
                     })
                     .catch(() => undefined);
                 }
-                const routeIntent = resolveNotificationRoute(item.event.target, item.actor);
-                if (routeIntent.kind === "request_view") {
+                if (item.event.deep_link?.includes("messages/requests")) {
                   setActiveView("request");
                   return;
                 }
-                if (routeIntent.kind === "navigate") {
-                  router.push(routeIntent.href);
+                if (item.event.object_type === "social_post" && item.event.object_id) {
+                  router.push({ pathname: "/post/[id]", params: { id: item.event.object_id } });
+                  return;
+                }
+                if (item.event.object_type === "user" && item.event.object_id) {
+                  router.push({
+                    pathname: "/user/[id]",
+                    params: {
+                      avatar: item.actor?.avatar_path ?? "",
+                      id: item.event.object_id,
+                      name: item.actor?.nickname ?? "网球用户",
+                    },
+                  });
                 }
               }}
             />
           ) : null}
           {!showActiveLoading && !showActiveError && activeView === "chat" ? (
-            conversationSearchMode ? (
-              <ConversationSearchPanel
-                completed={conversationSearchCompleted}
-                error={conversationSearchError}
-                loading={conversationSearchLoading}
-                loadingMore={conversationSearchLoadingMore}
-                nextPage={conversationSearchPage}
-                onClose={closeConversationSearch}
-                onLoadMore={() => {
-                  if (conversationSearchPage) {
-                    runConversationSearch(conversationSearchPage, true);
-                  }
-                }}
-                onQueryChange={setConversationSearchQuery}
-                onSubmit={() => runConversationSearch()}
-                query={conversationSearchQuery}
-                results={conversationSearchResults}
-              />
-            ) : (
-              <ChatList
-                items={conversations}
-                mutationIds={conversationMutationIds}
-                onAddFriend={openFriendSearch}
-                onTogglePin={handleConversationPin}
-                onToggleMute={handleConversationMute}
-                onHideConversation={handleConversationHide}
-              />
-            )
+            <ChatList items={conversations} onAddFriend={openFriendSearch} />
           ) : null}
           {!showActiveLoading && !showActiveError && activeView === "request" ? (
             <RequestList
-              actionPending={requestAction}
+              actionPendingId={requestActionId}
               items={requests}
               onAccept={(item) => handleRequestAction(item, "accept")}
               onDecline={(item) => handleRequestAction(item, "decline")}
@@ -869,16 +369,14 @@ export default function MessagesScreen() {
 }
 
 function NotificationList({
-  emptyMessage,
   items,
   onOpenNotification,
 }: {
-  emptyMessage: string;
   items: UserNotificationRecord[];
   onOpenNotification: (item: UserNotificationRecord) => void;
 }) {
   if (items.length === 0) {
-    return <StateBlock icon="sparkles-outline" message={emptyMessage} />;
+    return <StateBlock icon="sparkles-outline" message="还没有通知。新的关注、评论和系统消息会出现在这里。" />;
   }
 
   return (
@@ -914,129 +412,7 @@ function NotificationList({
   );
 }
 
-function ConversationSearchPanel({
-  completed,
-  error,
-  loading,
-  loadingMore,
-  nextPage,
-  onClose,
-  onLoadMore,
-  onQueryChange,
-  onSubmit,
-  query,
-  results,
-}: {
-  completed: boolean;
-  error: string | null;
-  loading: boolean;
-  loadingMore: boolean;
-  nextPage: number | null;
-  onClose: () => void;
-  onLoadMore: () => void;
-  onQueryChange: (value: string) => void;
-  onSubmit: () => void;
-  query: string;
-  results: ConversationListItem[];
-}) {
-  return (
-    <View style={styles.searchPanel}>
-      <View style={styles.searchInputRow}>
-        <Ionicons color={colors.muted} name="search" size={18} />
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={onQueryChange}
-          onSubmitEditing={onSubmit}
-          placeholder="搜索聊天"
-          placeholderTextColor={colors.muted}
-          returnKeyType="search"
-          style={styles.searchInput}
-          value={query}
-        />
-        <Pressable accessibilityLabel="开始搜索" accessibilityRole="button" onPress={onSubmit} style={styles.searchSubmitButton}>
-          <Ionicons color={colors.inverse} name="search" size={16} />
-        </Pressable>
-        <Pressable accessibilityLabel="关闭聊天搜索" accessibilityRole="button" onPress={onClose} style={styles.searchCloseButton}>
-          <Ionicons color={colors.ink} name="close" size={19} />
-        </Pressable>
-      </View>
-      {loading ? <StateBlock loading message="正在搜索聊天..." /> : null}
-      {error ? <StateBlock actionLabel="重试" icon="refresh-outline" message={error} onAction={onSubmit} /> : null}
-      {!loading && !error && completed && results.length === 0 ? (
-        <StateBlock icon="search-outline" message="未找到相关聊天" />
-      ) : null}
-      {results.map((item) => (
-        <ConversationSearchRow item={item} key={item.conversation.conversation_id} />
-      ))}
-      {nextPage ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={loadingMore}
-          onPress={onLoadMore}
-          style={[styles.searchMoreButton, loadingMore && styles.disabled]}
-        >
-          {loadingMore ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.searchMoreText}>加载更多聊天</Text>}
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function ConversationSearchRow({ item }: { item: ConversationListItem }) {
-  const router = useRouter();
-  const title = conversationTitle(item);
-  const pinned = Boolean(item.member.pinned_at);
-  const muted = item.member.is_muted;
-  const unreadCount = item.member.unread_count;
-  return (
-    <Pressable
-      accessibilityLabel={`打开与${title}的聊天`}
-      accessibilityRole="button"
-      onPress={() => router.push({
-        pathname: "/chat/[id]",
-        params: {
-          id: item.conversation.conversation_id,
-          name: title,
-          avatar: item.other_members[0]?.avatar_path ?? item.conversation.avatar_path ?? "",
-        },
-      })}
-      style={[styles.chatRow, unreadCount > 0 && styles.unreadCard]}
-    >
-      <Avatar name={title} size={48} uri={conversationAvatar(item)} />
-      <View style={styles.chatContent}>
-        <View style={styles.chatTopLine}>
-          <Text numberOfLines={1} style={styles.chatName}>{title}</Text>
-          <Text style={styles.chatTime}>{formatMessageTime(item.conversation.last_message_at ?? item.conversation.updated_at)}</Text>
-        </View>
-        <Text numberOfLines={1} style={styles.chatMessage}>{item.conversation.last_message_preview ?? "还没有消息"}</Text>
-      </View>
-      {pinned ? <Ionicons color={colors.clay} name="pin" size={16} /> : null}
-      {muted ? <Ionicons color={colors.muted} name="notifications-off-outline" size={16} /> : null}
-      {unreadCount > 0 ? (
-        <View style={styles.unreadBadge}>
-          <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-function ChatList({
-  items,
-  mutationIds,
-  onAddFriend,
-  onTogglePin,
-  onToggleMute,
-  onHideConversation,
-}: {
-  items: ConversationListItem[];
-  mutationIds: Set<string>;
-  onAddFriend: () => void;
-  onTogglePin: (conversationId: string, currentlyPinned: boolean) => void;
-  onToggleMute: (conversationId: string, currentlyMuted: boolean) => void;
-  onHideConversation: (conversationId: string) => void;
-}) {
+function ChatList({ items, onAddFriend }: { items: ConversationListItem[]; onAddFriend: () => void }) {
   const router = useRouter();
 
   if (items.length === 0) {
@@ -1055,40 +431,11 @@ function ChatList({
       {items.map((item) => {
         const title = conversationTitle(item);
         const unreadCount = item.member.unread_count;
-        const conversationId = item.conversation.conversation_id;
-        const pinned = Boolean(item.member.pinned_at);
-        const muted = item.member.is_muted;
-        const mutationPending = mutationIds.has(conversationId);
         return (
           <Pressable
-            accessibilityLabel={`打开与${title}的聊天，长按管理置顶、静音和隐藏`}
+            accessibilityLabel={`打开与${title}的聊天`}
             accessibilityRole="button"
-            key={conversationId}
-            onLongPress={() => {
-              if (mutationPending) {
-                return;
-              }
-              Alert.alert(
-                "聊天管理",
-                title,
-                [
-                  { text: "取消", style: "cancel" },
-                  {
-                    text: pinned ? "取消置顶" : "置顶",
-                    onPress: () => onTogglePin(conversationId, pinned),
-                  },
-                  {
-                    text: muted ? "取消静音" : "静音 24 小时",
-                    onPress: () => onToggleMute(conversationId, muted),
-                  },
-                  {
-                    text: "隐藏聊天",
-                    style: "destructive",
-                    onPress: () => onHideConversation(conversationId),
-                  },
-                ],
-              );
-            }}
+            key={item.conversation.conversation_id}
             onPress={() =>
               router.push({
                 pathname: "/chat/[id]",
@@ -1111,8 +458,6 @@ function ChatList({
                 {item.conversation.last_message_preview ?? "还没有消息"}
               </Text>
             </View>
-            {pinned ? <Ionicons color={colors.clay} name="pin" size={16} /> : null}
-            {muted ? <Ionicons color={colors.muted} name="notifications-off-outline" size={16} /> : null}
             {unreadCount > 0 ? (
               <View style={styles.unreadBadge}>
                 <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
@@ -1126,12 +471,12 @@ function ChatList({
 }
 
 function RequestList({
-  actionPending,
+  actionPendingId,
   items,
   onAccept,
   onDecline,
 }: {
-  actionPending: RequestPendingAction | null;
+  actionPendingId: string | null;
   items: MessageRequestRecord[];
   onAccept: (item: MessageRequestRecord) => void;
   onDecline: (item: MessageRequestRecord) => void;
@@ -1144,8 +489,7 @@ function RequestList({
     <View style={styles.list}>
       {items.map((item) => {
         const user = requestDisplayUser(item);
-        const pending = actionPending?.id === item.message_request_id;
-        const hasPendingAction = Boolean(actionPending);
+        const pending = actionPendingId === item.message_request_id;
         return (
           <Card key={item.message_request_id} style={styles.requestCard}>
             <View style={styles.requestHeader}>
@@ -1159,23 +503,19 @@ function RequestList({
             <View style={styles.requestActions}>
               <Pressable
                 accessibilityRole="button"
-                disabled={hasPendingAction}
+                disabled={pending}
                 onPress={() => onDecline(item)}
-                style={[styles.requestButton, styles.requestButtonSecondary, hasPendingAction && styles.disabled]}
+                style={[styles.requestButton, styles.requestButtonSecondary, pending && styles.disabled]}
               >
-                {pending && actionPending?.action === "decline" ? (
-                  <ActivityIndicator color={colors.ink} size="small" />
-                ) : (
-                  <Text style={styles.requestButtonTextSecondary}>忽略</Text>
-                )}
+                <Text style={styles.requestButtonTextSecondary}>忽略</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                disabled={hasPendingAction}
+                disabled={pending}
                 onPress={() => onAccept(item)}
-                style={[styles.requestButton, hasPendingAction && styles.disabled]}
+                style={[styles.requestButton, pending && styles.disabled]}
               >
-                {pending && actionPending?.action === "accept" ? (
+                {pending ? (
                   <ActivityIndicator color={colors.inverse} size="small" />
                 ) : (
                   <Text style={styles.requestButtonText}>接受</Text>
@@ -1220,9 +560,6 @@ function StateBlock({
 }
 
 const styles = StyleSheet.create({
-  notificationCategoryControl: {
-    marginTop: 10,
-  },
   list: {
     gap: 10,
     marginTop: 22,
@@ -1241,55 +578,6 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: "center",
     width: 36,
-  },
-  searchPanel: {
-    gap: 10,
-    marginTop: 22,
-  },
-  searchInputRow: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: radius.card,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: 8,
-    minHeight: 46,
-    paddingHorizontal: 12,
-  },
-  searchInput: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: 14,
-    minWidth: 0,
-    paddingVertical: 9,
-  },
-  searchSubmitButton: {
-    alignItems: "center",
-    backgroundColor: colors.ink,
-    borderRadius: radius.control,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
-  },
-  searchCloseButton: {
-    alignItems: "center",
-    height: 32,
-    justifyContent: "center",
-    width: 28,
-  },
-  searchMoreButton: {
-    alignItems: "center",
-    borderColor: colors.line,
-    borderRadius: radius.control,
-    borderWidth: StyleSheet.hairlineWidth,
-    justifyContent: "center",
-    minHeight: 40,
-  },
-  searchMoreText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: "800",
   },
   noticeCard: {
     alignItems: "center",

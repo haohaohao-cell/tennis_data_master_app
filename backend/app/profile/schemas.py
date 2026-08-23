@@ -92,10 +92,6 @@ class ProfileContentStats(BaseModel):
     matches: int
     training: int
     courses: int
-    received_like_count: int
-    friend_count: int
-    following_count: int
-    follower_count: int
 
 
 class ProfileContentResponse(BaseModel):

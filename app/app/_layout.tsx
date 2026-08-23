@@ -69,7 +69,6 @@ function RootNavigation() {
         <Stack.Screen name="student/[id]" />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="friends/search" />
-        <Stack.Screen name="friends/list" />
         <Stack.Screen name="profile/edit" />
         <Stack.Screen name="profile/settings" />
         <Stack.Screen name="profile/coach-apply" />

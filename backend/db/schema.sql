@@ -588,25 +588,6 @@ CREATE TABLE IF NOT EXISTS user_privacy_settings (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS user_notification_preferences (
-    user_id TEXT PRIMARY KEY,
-    direct_message_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (direct_message_notifications IN (0, 1)),
-    message_request_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (message_request_notifications IN (0, 1)),
-    like_comment_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (like_comment_notifications IN (0, 1)),
-    follow_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (follow_notifications IN (0, 1)),
-    course_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (course_notifications IN (0, 1)),
-    ai_analysis_notifications INTEGER NOT NULL DEFAULT 1
-        CHECK (ai_analysis_notifications IN (0, 1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS user_post_views (
     user_post_view_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -1689,16 +1670,6 @@ FOR EACH ROW
 WHEN NEW.updated_at = OLD.updated_at
 BEGIN
     UPDATE user_privacy_settings
-    SET updated_at = CURRENT_TIMESTAMP
-    WHERE user_id = OLD.user_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_user_notification_preferences_set_updated_at
-AFTER UPDATE ON user_notification_preferences
-FOR EACH ROW
-WHEN NEW.updated_at = OLD.updated_at
-BEGIN
-    UPDATE user_notification_preferences
     SET updated_at = CURRENT_TIMESTAMP
     WHERE user_id = OLD.user_id;
 END;

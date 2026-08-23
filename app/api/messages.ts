@@ -1,30 +1,4 @@
-import { ApiError, apiRequest } from "@/api/client";
-
-export const MESSAGE_SEND_TIMEOUT_MS = 15_000;
-
-/** A send wait boundary; the underlying request may still finish and be reconciled by polling. */
-export class MessageSendTimeoutError extends Error {
-  constructor() {
-    super("发送超时，请检查网络后重试。");
-    this.name = "MessageSendTimeoutError";
-  }
-}
-
-export function isRetryableSendError(error: unknown) {
-  if (error instanceof MessageSendTimeoutError) {
-    return true;
-  }
-  if (!(error instanceof ApiError)) {
-    return false;
-  }
-  return (
-    (error.status === 0 && error.code === "NETWORK_ERROR") ||
-    error.status === 408 ||
-    error.status === 425 ||
-    error.status === 429 ||
-    error.status >= 500
-  );
-}
+import { apiRequest } from "@/api/client";
 
 export type ConversationType = "direct" | "group";
 export type MessageType =
@@ -77,7 +51,6 @@ export type ConversationMemberRecord = {
   left_at: string | null;
   member_role: string;
   muted_until: string | null;
-  is_muted: boolean;
   pinned_at: string | null;
   status: string;
   unread_count: number;
@@ -94,26 +67,6 @@ export type ConversationListResponse = {
   items: ConversationListItem[];
   page: number;
   page_size: number;
-};
-
-export type ConversationPinResponse = {
-  conversation_id: string;
-  pinned_at: string | null;
-  success: boolean;
-};
-
-export type ConversationMuteResponse = {
-  conversation_id: string;
-  is_muted: boolean;
-  muted_until: string | null;
-  success: boolean;
-};
-
-export type ConversationHideResponse = {
-  archived_at: string | null;
-  conversation_id: string;
-  is_hidden: boolean;
-  success: boolean;
 };
 
 export type ConversationCreateResponse = {
@@ -140,15 +93,6 @@ export type MessageAttachmentRecord = {
   width_px: number | null;
 };
 
-export type MessageReplyPreview = {
-  message_id: string;
-  message_seq: number | null;
-  sender_nickname: string | null;
-  sender_user_id: string | null;
-  state: "available" | "unavailable";
-  text_content: string | null;
-};
-
 export type ChatMessageRecord = {
   attachments: MessageAttachmentRecord[];
   client_message_id: string | null;
@@ -162,7 +106,6 @@ export type ChatMessageRecord = {
   message_type: MessageType;
   payload_json: string | null;
   reply_to_message_id: string | null;
-  reply_preview: MessageReplyPreview | null;
   sender: MessageUserSummary | null;
   sender_type: string;
   sender_user_id: string | null;
@@ -176,21 +119,8 @@ export type ChatMessageRecord = {
 
 export type MessageListResponse = {
   conversation_id: string;
-  direct_interaction_state: DirectConversationInteractionState | null;
   items: ChatMessageRecord[];
   next_before_seq: number | null;
-  other_member_last_read_message_seq: number | null;
-};
-
-export type ConversationMessageSearchResponse = {
-  conversation_id: string;
-  items: ChatMessageRecord[];
-  next_before_seq: number | null;
-};
-
-export type DirectConversationInteractionState = {
-  blocked_by_current_user: boolean;
-  can_send: boolean;
 };
 
 export type MessageSendResponse = {
@@ -227,58 +157,19 @@ export type MessageRequestActionResponse = {
   success: boolean;
 };
 
-export type NotificationCategory = "interaction" | "system" | "ai" | "coach" | "lesson";
-export type NotificationProductCategory = "interaction_follow" | "course_system" | "request";
-export type NotificationEventType =
-  | "follow"
-  | "post_like"
-  | "post_comment"
-  | "comment_reply"
-  | "mention"
-  | "video_shared"
-  | "ai_analysis_completed"
-  | "lesson_created"
-  | "lesson_updated"
-  | "coach_application_reviewed"
-  | "system_announcement"
-  | "custom";
-export type NotificationType = NotificationEventType | "message_request";
-export type NotificationPreferences = {
-  direct_message_notifications: boolean;
-  message_request_notifications: boolean;
-  like_comment_notifications: boolean;
-  follow_notifications: boolean;
-  course_notifications: boolean;
-  ai_analysis_notifications: boolean;
-};
-export type NotificationPreferencePatch = Partial<NotificationPreferences>;
-export type NotificationTarget =
-  | { type: "user_profile"; user_id: string }
-  | { type: "post_detail"; post_id: string }
-  | { type: "post_comments"; post_id: string }
-  | { type: "message_request"; request_id: string | null }
-  | { type: "chat"; conversation_id: string }
-  | { type: "activity_detail"; activity_id: string }
-  | { type: "lesson_detail"; lesson_id: string }
-  | { type: "coach_identity" }
-  | { type: "none" };
-
 export type NotificationEventRecord = {
   actor_user_id: string | null;
   body: string | null;
-  category: NotificationCategory;
+  category: string;
   context_id: string | null;
   context_type: string | null;
   created_at: string;
   deep_link: string | null;
-  event_type: NotificationEventType;
-  notification_type: NotificationType;
+  event_type: string;
   notification_event_id: string;
   object_id: string | null;
   object_type: string | null;
   payload_json: string | null;
-  product_category: NotificationProductCategory;
-  target: NotificationTarget;
   title: string | null;
 };
 
@@ -305,8 +196,6 @@ export type NotificationListResponse = {
 };
 
 export type UnreadCountsResponse = {
-  messages_tab_badge_count: number;
-  pending_message_request_count: number;
   total_unread_count: number;
   unread_direct_message_count: number;
   unread_group_message_count: number;
@@ -331,39 +220,6 @@ export function listConversations(accessToken: string, page = 1, pageSize = 30) 
   });
 }
 
-export function createGroupConversation(
-  accessToken: string,
-  title: string,
-  memberUserIds: string[],
-) {
-  return apiRequest<ConversationCreateResponse>("/api/v1/messages/groups", {
-    accessToken,
-    body: {
-      group_type: "custom",
-      member_user_ids: memberUserIds,
-      title: title.trim(),
-    },
-    captureDiagnostics: false,
-    method: "POST",
-  });
-}
-
-export function searchConversations(
-  accessToken: string,
-  query: string,
-  options: { page?: number; pageSize?: number } = {},
-) {
-  const params = new URLSearchParams({
-    page: String(options.page ?? 1),
-    page_size: String(options.pageSize ?? 30),
-    q: query.trim(),
-  });
-  return apiRequest<ConversationListResponse>(`/api/v1/messages/conversations/search?${params.toString()}`, {
-    accessToken,
-    captureDiagnostics: false,
-  });
-}
-
 export function listMessages(
   accessToken: string,
   conversationId: string,
@@ -384,132 +240,25 @@ export function sendTextMessage(
   conversationId: string,
   textContent: string,
   clientMessageId: string,
-  replyToMessageId?: string | null,
 ) {
-  const request = apiRequest<MessageSendResponse>(
+  return apiRequest<MessageSendResponse>(
     `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       accessToken,
-      captureDiagnostics: false,
       body: {
         client_message_id: clientMessageId,
         message_type: "text",
-        reply_to_message_id: replyToMessageId ?? null,
         text_content: textContent,
       },
       method: "POST",
     },
   );
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new MessageSendTimeoutError()), MESSAGE_SEND_TIMEOUT_MS);
-  });
-
-  return Promise.race([request, timeout]).finally(() => {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-  });
 }
 
-export function recallMessage(accessToken: string, conversationId: string, messageId: string) {
-  return apiRequest<MessageSendResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/recall`,
-    { accessToken, method: "POST" },
-  );
-}
-
-export function reconcileMessages(accessToken: string, conversationId: string, messageIds: string[]) {
-  return apiRequest<{ conversation_id: string; items: ChatMessageRecord[] }>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/reconcile`,
-    {
-      accessToken,
-      body: { message_ids: messageIds },
-      method: "POST",
-    },
-  );
-}
-
-export function markConversationRead(
-  accessToken: string,
-  conversationId: string,
-  throughMessageSeq?: number | null,
-) {
-  return apiRequest<{
-    conversation_id: string;
-    last_read_message_seq: number;
-    success: boolean;
-    unread_count: number;
-  }>(
+export function markConversationRead(accessToken: string, conversationId: string) {
+  return apiRequest<{ conversation_id: string; success: boolean; unread_count: number }>(
     `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/read`,
-    {
-      accessToken,
-      body: throughMessageSeq === null || throughMessageSeq === undefined
-        ? undefined
-        : { through_message_seq: throughMessageSeq },
-      method: "POST",
-    },
-  );
-}
-
-export function searchConversationMessages(
-  accessToken: string,
-  conversationId: string,
-  query: string,
-  options: { beforeSeq?: number | null; pageSize?: number } = {},
-) {
-  const params = new URLSearchParams({
-    page_size: String(options.pageSize ?? 30),
-    q: query.trim(),
-  });
-  if (options.beforeSeq) {
-    params.set("before_seq", String(options.beforeSeq));
-  }
-  return apiRequest<ConversationMessageSearchResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/search?${params.toString()}`,
-    { accessToken, captureDiagnostics: false },
-  );
-}
-
-export function pinConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationPinResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/pin`,
     { accessToken, method: "POST" },
-  );
-}
-
-export function unpinConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationPinResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/pin`,
-    { accessToken, method: "DELETE" },
-  );
-}
-
-export function muteConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationMuteResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/mute`,
-    { accessToken, method: "POST" },
-  );
-}
-
-export function unmuteConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationMuteResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/mute`,
-    { accessToken, method: "DELETE" },
-  );
-}
-
-export function hideConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationHideResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/hide`,
-    { accessToken, method: "POST" },
-  );
-}
-
-export function unhideConversation(accessToken: string, conversationId: string) {
-  return apiRequest<ConversationHideResponse>(
-    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/hide`,
-    { accessToken, method: "DELETE" },
   );
 }
 
@@ -519,41 +268,17 @@ export function getUnreadCounts(accessToken: string) {
 
 export function listNotifications(
   accessToken: string,
-  options: {
-    category?: NotificationCategory | null;
-    page?: number;
-    pageSize?: number;
-    productCategory?: NotificationProductCategory | null;
-    unreadOnly?: boolean;
-  } = {},
+  options: { category?: string | null; page?: number; pageSize?: number; unreadOnly?: boolean } = {},
 ) {
   const params = [paginationQuery(options.page ?? 1, options.pageSize ?? 30)];
   if (options.category) {
     params.push(`category=${encodeURIComponent(options.category)}`);
-  }
-  if (options.productCategory) {
-    params.push(`product_category=${encodeURIComponent(options.productCategory)}`);
   }
   if (options.unreadOnly) {
     params.push("unread_only=true");
   }
   return apiRequest<NotificationListResponse>(`/api/v1/notifications?${params.join("&")}`, {
     accessToken,
-  });
-}
-
-export function getNotificationPreferences(accessToken: string) {
-  return apiRequest<NotificationPreferences>("/api/v1/notifications/preferences", { accessToken });
-}
-
-export function updateNotificationPreferences(
-  accessToken: string,
-  patch: NotificationPreferencePatch,
-) {
-  return apiRequest<NotificationPreferences>("/api/v1/notifications/preferences", {
-    accessToken,
-    body: patch,
-    method: "PATCH",
   });
 }
 
@@ -579,7 +304,6 @@ export function createMessageRequest(
 ) {
   return apiRequest<MessageRequestActionResponse>("/api/v1/messages/requests", {
     accessToken,
-    captureDiagnostics: false,
     body: {
       request_message: requestMessage,
       source,

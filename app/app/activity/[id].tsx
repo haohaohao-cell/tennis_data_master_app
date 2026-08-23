@@ -4,7 +4,7 @@ import { Image } from "expo-image";
 import { VideoView, useVideoPlayer, type VideoSource } from "expo-video";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   getActivityDetail,
@@ -14,7 +14,7 @@ import {
 } from "@/api/activityDetail";
 import { ApiError } from "@/api/client";
 import { formatActivityLocation } from "@/api/location";
-import { deleteActivity, type ActivityType, type AnalysisStatus, type UploadStatus, type VideoRecord } from "@/api/uploads";
+import type { ActivityType, AnalysisStatus, UploadStatus, VideoRecord } from "@/api/uploads";
 import { useAuth } from "@/auth/AuthProvider";
 import { Card, Pill, ScrollPage, SegmentedControl, TopBar, type IconName } from "@/components/ui";
 import { colors, radius } from "@/theme";
@@ -164,7 +164,6 @@ export default function ActivityDetailScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const activityId = typeof id === "string" ? id : null;
 
@@ -202,27 +201,6 @@ export default function ActivityDetailScreen() {
       }
     }, [loadDetail, status]),
   );
-
-  const confirmDelete = useCallback(() => {
-    if (!activityId || !accessToken || deleting) {
-      return;
-    }
-
-    Alert.alert("删除日记", "删除后将无法恢复，确定要删除吗？", [
-      { style: "cancel", text: "取消" },
-      {
-        style: "destructive",
-        text: "删除",
-        onPress: () => {
-          setDeleting(true);
-          void deleteActivity(accessToken, activityId)
-            .then(() => router.back())
-            .catch((deleteError) => Alert.alert("删除失败", detailErrorMessage(deleteError)))
-            .finally(() => setDeleting(false));
-        },
-      },
-    ]);
-  }, [accessToken, activityId, deleting, router]);
 
   const selectedVideo = useMemo(() => {
     if (!detail?.videos.length) {
@@ -308,23 +286,6 @@ export default function ActivityDetailScreen() {
     <ScrollPage contentStyle={styles.pageContent}>
       <TopBar
         onBack={() => router.back()}
-        right={
-          detail.permissions.can_manage ? (
-            <Pressable
-              accessibilityLabel="删除日记"
-              accessibilityRole="button"
-              disabled={deleting}
-              onPress={confirmDelete}
-              style={styles.deleteButton}
-            >
-              {deleting ? (
-                <ActivityIndicator color={colors.clay} size="small" />
-              ) : (
-                <Ionicons color={colors.clay} name="trash-outline" size={20} />
-              )}
-            </Pressable>
-          ) : null
-        }
         subtitle={detail.lesson ? "课程 Activity" : "Activity 详情"}
         title={activityTitle}
       />
@@ -675,12 +636,6 @@ function visibilityLabel(value: string) {
 const styles = StyleSheet.create({
   pageContent: {
     gap: 16,
-  },
-  deleteButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 40,
-    minWidth: 40,
   },
   playerShell: {
     aspectRatio: 16 / 9,

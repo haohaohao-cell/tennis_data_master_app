@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,20 +17,24 @@ import {
   Text,
   TextInput,
   View,
+  type ViewToken,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { resolveMediaUrl } from "@/api/activityDetail";
 import { ApiError } from "@/api/client";
-import { clearPostDetailPreview, peekPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
+import { listConversations, type ConversationListItem } from "@/api/messages";
+import { peekPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
 import {
   createPostComment,
-  deletePost,
+  deletePostComment,
   favoritePost,
   getReadablePostDetail,
   likePost,
   listPostComments,
   reportPostViews,
+  sharePost,
   type PostCommentRecord,
   type PostDetailResponse,
   type PostStats,
@@ -123,35 +128,81 @@ function mergeViewerState(
 
 export default function PostDetailScreen() {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
   const requireAuth = useRequireAuth();
-  const { id, focus } = useLocalSearchParams<{ focus?: string; id?: string }>();
+  const { id, focus, streamIds } = useLocalSearchParams<{
+    focus?: string;
+    id?: string;
+    streamIds?: string;
+  }>();
   const { accessToken, status, userId } = useAuth();
-  const postId = typeof id === "string" ? id : null;
+  const initialPostId = typeof id === "string" ? id : null;
+  const postIds = useMemo(() => {
+    const ids =
+      typeof streamIds === "string"
+        ? streamIds.split(",").map((value) => value.trim()).filter(Boolean)
+        : [];
+    if (initialPostId && !ids.includes(initialPostId)) {
+      ids.unshift(initialPostId);
+    }
+    return ids.length ? ids : initialPostId ? [initialPostId] : [];
+  }, [initialPostId, streamIds]);
+  const [activePostId, setActivePostId] = useState<string | null>(initialPostId);
   const [detail, setDetail] = useState<PostDetailResponse | null>(() =>
-    peekPostDetailPreview(postId),
+    peekPostDetailPreview(initialPostId),
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [interactionPending, setInteractionPending] = useState<"favorite" | "like" | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [interactionPending, setInteractionPending] = useState<
+    "favorite" | "like" | "share" | null
+  >(null);
   const [commentsOpen, setCommentsOpen] = useState(focus === "comments");
   const [comments, setComments] = useState<PostCommentRecord[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentsPage, setCommentsPage] = useState(1);
   const [commentDraft, setCommentDraft] = useState("");
+  const [replyTarget, setReplyTarget] = useState<PostCommentRecord | null>(null);
+  const [expandedReplies, setExpandedReplies] = useState<Record<string, PostCommentRecord[]>>({});
+  const [replyLoadingIds, setReplyLoadingIds] = useState<string[]>([]);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const reportedDetailViewIdsRef = useRef<Set<string>>(new Set());
+  const watchStartRef = useRef<number | null>(null);
+  const watchAccumRef = useRef<number>(0);
+  const lastReportedWatchMsRef = useRef<number>(0);
+  const activePostIdRef = useRef<string | null>(initialPostId);
+  const detailListRef = useRef<FlatList<string>>(null);
 
   useEffect(() => {
-    setDetail(peekPostDetailPreview(postId));
+    activePostIdRef.current = activePostId;
+  }, [activePostId]);
+
+  useEffect(() => {
+    setActivePostId(initialPostId);
+    setDetail(peekPostDetailPreview(initialPostId));
     setError(null);
     setComments([]);
     setCommentsError(null);
+    setCommentsPage(1);
+    setCommentsHasMore(false);
     setCommentDraft("");
-  }, [postId]);
+    setReplyTarget(null);
+    setExpandedReplies({});
+    setShareOpen(false);
+    setShareError(null);
+    watchStartRef.current = null;
+    watchAccumRef.current = 0;
+    lastReportedWatchMsRef.current = 0;
+  }, [initialPostId]);
 
   const loadDetail = useCallback(async () => {
-    if (!postId) {
+    if (!activePostId) {
       setError("缺少 post id，无法打开详情。");
       setDetail(null);
       return;
@@ -160,13 +211,13 @@ export default function PostDetailScreen() {
     setLoading(true);
     setError(null);
     try {
-      const response = await getReadablePostDetail(postId, accessToken);
+      const response = await getReadablePostDetail(activePostId, accessToken);
       primePostDetailPreview(response);
       setDetail(response);
-      if (accessToken && !reportedDetailViewIdsRef.current.has(postId)) {
-        reportedDetailViewIdsRef.current.add(postId);
+      if (accessToken && !reportedDetailViewIdsRef.current.has(activePostId)) {
+        reportedDetailViewIdsRef.current.add(activePostId);
         void reportPostViews(accessToken, {
-          items: [{ dwell_time_ms: 0, social_post_id: postId, source: "post_detail" }],
+          items: [{ dwell_time_ms: 0, social_post_id: activePostId, source: "post_detail" }],
         }).catch(() => undefined);
       }
     } catch (loadError) {
@@ -177,26 +228,41 @@ export default function PostDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, postId]);
+  }, [accessToken, activePostId]);
 
-  const loadComments = useCallback(async () => {
-    if (!postId) {
+  const loadComments = useCallback(async (page = 1) => {
+    if (!activePostId) {
       return;
     }
-    setCommentsLoading(true);
+    if (page === 1) {
+      setCommentsLoading(true);
+    } else {
+      setCommentsLoadingMore(true);
+    }
     setCommentsError(null);
     try {
-      const response = await listPostComments(postId, {
+      const response = await listPostComments(activePostId, {
         accessToken,
+        page,
         pageSize: 50,
       });
-      setComments(response.items);
+      setComments((current) => (page === 1 ? response.items : [...current, ...response.items]));
+      setCommentsPage(page);
+      setCommentsHasMore(response.items.length === response.page_size);
     } catch (loadError) {
       setCommentsError(detailErrorMessage(loadError));
     } finally {
       setCommentsLoading(false);
+      setCommentsLoadingMore(false);
     }
-  }, [accessToken, postId]);
+  }, [accessToken, activePostId]);
+
+  const loadMoreComments = useCallback(() => {
+    if (!commentsHasMore || commentsLoading || commentsLoadingMore) {
+      return;
+    }
+    void loadComments(commentsPage + 1);
+  }, [commentsHasMore, commentsLoading, commentsLoadingMore, commentsPage, loadComments]);
 
   useFocusEffect(
     useCallback(() => {
@@ -207,6 +273,12 @@ export default function PostDetailScreen() {
   );
 
   useEffect(() => {
+    if (status !== "loading") {
+      void loadDetail();
+    }
+  }, [activePostId, loadDetail, status]);
+
+  useEffect(() => {
     if (focus === "comments") {
       setCommentsOpen(true);
     }
@@ -214,21 +286,104 @@ export default function PostDetailScreen() {
 
   useEffect(() => {
     if (commentsOpen) {
-      void loadComments();
+      void loadComments(1);
     }
   }, [commentsOpen, loadComments]);
 
-  const toggleLike = useCallback(() => {
-    if (!detail || !postId || interactionPending) {
+  const currentVideo = detail?.videos.find((video) => video.upload_status === "uploaded") ?? null;
+
+  const flushWatchTime = useCallback(async () => {
+    if (!detail || !currentVideo) {
       return;
     }
-    if (!accessToken || !requireAuth("登录后可以点赞这条动态", `/post/${postId}`)) {
+    if (watchStartRef.current) {
+      watchAccumRef.current += Math.max(0, Date.now() - watchStartRef.current);
+      watchStartRef.current = null;
+    }
+    const payloadMs = watchAccumRef.current;
+    if (payloadMs <= lastReportedWatchMsRef.current) {
+      return;
+    }
+    lastReportedWatchMsRef.current = payloadMs;
+    if (accessToken) {
+      await reportPostViews(accessToken, {
+        items: [
+          {
+            dwell_time_ms: payloadMs,
+            social_post_id: detail.post.social_post_id,
+            source: "post_detail",
+          },
+        ],
+      }).catch(() => undefined);
+    }
+  }, [accessToken, detail, currentVideo]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        void flushWatchTime();
+      };
+    }, [flushWatchTime]),
+  );
+
+  const resetPanelStateForPost = useCallback((nextPostId: string) => {
+    setDetail(peekPostDetailPreview(nextPostId));
+    setError(null);
+    setComments([]);
+    setCommentsError(null);
+    setCommentsPage(1);
+    setCommentsHasMore(false);
+    setCommentDraft("");
+    setReplyTarget(null);
+    setExpandedReplies({});
+    setShareOpen(false);
+    setShareError(null);
+    watchStartRef.current = null;
+    watchAccumRef.current = 0;
+    lastReportedWatchMsRef.current = 0;
+  }, []);
+
+  const onStreamViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken<string>[] }) => {
+      const nextPostId = viewableItems[0]?.item ?? null;
+      if (!nextPostId || nextPostId === activePostIdRef.current) {
+        return;
+      }
+      void flushWatchTime();
+      setActivePostId(nextPostId);
+      resetPanelStateForPost(nextPostId);
+    },
+  ).current;
+
+  const streamViewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 80,
+    minimumViewTime: 120,
+  }).current;
+
+  const handleVideoPlayingChange = useCallback(
+    (isPlaying: boolean) => {
+      if (isPlaying) {
+        if (!watchStartRef.current) {
+          watchStartRef.current = Date.now();
+        }
+        return;
+      }
+      void flushWatchTime();
+    },
+    [flushWatchTime],
+  );
+
+  const toggleLike = useCallback(() => {
+    if (!detail || !activePostId || interactionPending) {
+      return;
+    }
+    if (!accessToken || !requireAuth("登录后可以点赞这条动态", `/post/${activePostId}`)) {
       return;
     }
 
     setInteractionPending("like");
     const liked = Boolean(detail.viewer_state?.is_liked);
-    const request = liked ? unlikePost(accessToken, postId) : likePost(accessToken, postId);
+    const request = liked ? unlikePost(accessToken, activePostId) : likePost(accessToken, activePostId);
     void request
       .then((response) => {
         setDetail((current) =>
@@ -239,21 +394,21 @@ export default function PostDetailScreen() {
       })
       .catch((actionError) => Alert.alert("点赞失败", detailErrorMessage(actionError)))
       .finally(() => setInteractionPending(null));
-  }, [accessToken, detail, interactionPending, postId, requireAuth]);
+  }, [accessToken, activePostId, detail, interactionPending, requireAuth]);
 
   const toggleFavorite = useCallback(() => {
-    if (!detail || !postId || interactionPending) {
+    if (!detail || !activePostId || interactionPending) {
       return;
     }
-    if (!accessToken || !requireAuth("登录后可以收藏这条动态", `/post/${postId}`)) {
+    if (!accessToken || !requireAuth("登录后可以收藏这条动态", `/post/${activePostId}`)) {
       return;
     }
 
     setInteractionPending("favorite");
     const favorited = Boolean(detail.viewer_state?.is_favorited);
     const request = favorited
-      ? unfavoritePost(accessToken, postId)
-      : favoritePost(accessToken, postId);
+      ? unfavoritePost(accessToken, activePostId)
+      : favoritePost(accessToken, activePostId);
     void request
       .then((response) => {
         setDetail((current) =>
@@ -266,29 +421,150 @@ export default function PostDetailScreen() {
       })
       .catch((actionError) => Alert.alert("收藏失败", detailErrorMessage(actionError)))
       .finally(() => setInteractionPending(null));
-  }, [accessToken, detail, interactionPending, postId, requireAuth]);
+  }, [accessToken, activePostId, detail, interactionPending, requireAuth]);
+
+  const openShare = useCallback(async () => {
+    if (!activePostId || !accessToken || !requireAuth("登录后可以分享这条动态", `/post/${activePostId}`)) {
+      return;
+    }
+    setShareOpen(true);
+    setShareLoading(true);
+    setShareError(null);
+    try {
+      const response = await listConversations(accessToken, 1, 50);
+      setConversations(response.items);
+    } catch (shareLoadError) {
+      setShareError(detailErrorMessage(shareLoadError));
+    } finally {
+      setShareLoading(false);
+    }
+  }, [accessToken, activePostId, requireAuth]);
+
+  const shareToConversation = useCallback(
+    (conversationId: string) => {
+      if (!activePostId || !accessToken || interactionPending === "share") {
+        return;
+      }
+      setInteractionPending("share");
+      void sharePost(accessToken, activePostId, {
+        conversationId,
+        messageText: detail?.post.title ?? "分享了一条网球动态",
+      })
+        .then((response) => {
+          setDetail((current) => (current ? { ...current, stats: response.stats } : current));
+          setShareOpen(false);
+          Alert.alert("分享成功", "动态已发送到站内会话。");
+        })
+        .catch((shareErrorValue) => Alert.alert("分享失败", detailErrorMessage(shareErrorValue)))
+        .finally(() => setInteractionPending(null));
+    },
+    [accessToken, activePostId, detail?.post.title, interactionPending],
+  );
+
+  const loadReplies = useCallback(
+    async (commentId: string) => {
+      if (!activePostId || replyLoadingIds.includes(commentId)) {
+        return;
+      }
+      setReplyLoadingIds((current) => [...current, commentId]);
+      try {
+        const response = await listPostComments(activePostId, {
+          accessToken,
+          pageSize: 50,
+          parentCommentId: commentId,
+        });
+        setExpandedReplies((current) => ({ ...current, [commentId]: response.items }));
+      } catch (replyError) {
+        Alert.alert("回复加载失败", detailErrorMessage(replyError));
+      } finally {
+        setReplyLoadingIds((current) => current.filter((idValue) => idValue !== commentId));
+      }
+    },
+    [accessToken, activePostId, replyLoadingIds],
+  );
+
+  const toggleReplies = useCallback(
+    (commentId: string) => {
+      if (expandedReplies[commentId]) {
+        setExpandedReplies((current) => {
+          const next = { ...current };
+          delete next[commentId];
+          return next;
+        });
+        return;
+      }
+      void loadReplies(commentId);
+    },
+    [expandedReplies, loadReplies],
+  );
+
+  const deleteComment = useCallback(
+    (comment: PostCommentRecord) => {
+      if (!activePostId || !accessToken) {
+        return;
+      }
+      Alert.alert("删除评论", "确定删除这条评论吗？", [
+        { text: "取消", style: "cancel" },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: () => {
+            void deletePostComment(accessToken, activePostId, comment.comment_id)
+              .then((response) => {
+                setComments((current) =>
+                  current.filter((item) => item.comment_id !== comment.comment_id),
+                );
+                setExpandedReplies((current) => {
+                  const next = { ...current };
+                  for (const [parentId, replies] of Object.entries(next)) {
+                    next[parentId] = replies.filter(
+                      (item) => item.comment_id !== comment.comment_id,
+                    );
+                  }
+                  return next;
+                });
+                setDetail((current) => (current ? { ...current, stats: response.stats } : current));
+              })
+              .catch((deleteError) => Alert.alert("删除失败", detailErrorMessage(deleteError)));
+          },
+        },
+      ]);
+    },
+    [accessToken, activePostId],
+  );
 
   const submitComment = useCallback(() => {
     const content = commentDraft.trim();
-    if (!postId || commentSubmitting || !content) {
+    if (!activePostId || commentSubmitting || !content) {
       return;
     }
-    if (!accessToken || !requireAuth("登录后可以评论这条动态", `/post/${postId}`)) {
+    if (!accessToken || !requireAuth("登录后可以评论这条动态", `/post/${activePostId}`)) {
       return;
     }
 
     setCommentSubmitting(true);
-    void createPostComment(accessToken, postId, content)
+    void createPostComment(accessToken, activePostId, content, replyTarget?.comment_id ?? null)
       .then((response) => {
-        setComments((current) => [...current, response.comment]);
+        if (replyTarget) {
+          setExpandedReplies((current) => ({
+            ...current,
+            [replyTarget.comment_id]: [
+              ...(current[replyTarget.comment_id] ?? []),
+              response.comment,
+            ],
+          }));
+        } else {
+          setComments((current) => [...current, response.comment]);
+        }
         setCommentDraft("");
+        setReplyTarget(null);
         setDetail((current) =>
           current ? { ...current, stats: response.stats } : current,
         );
       })
       .catch((commentError) => Alert.alert("评论失败", detailErrorMessage(commentError)))
       .finally(() => setCommentSubmitting(false));
-  }, [accessToken, commentDraft, commentSubmitting, postId, requireAuth]);
+  }, [accessToken, activePostId, commentDraft, commentSubmitting, replyTarget, requireAuth]);
 
   const openAuthor = useCallback(() => {
     if (!detail) {
@@ -309,35 +585,11 @@ export default function PostDetailScreen() {
     if (!sourceActivityId) {
       return;
     }
-    if (!requireAuth("查看来源活动需要登录后继续", `/post/${postId ?? ""}`)) {
+    if (!requireAuth("查看来源活动需要登录后继续", `/post/${activePostId ?? ""}`)) {
       return;
     }
     router.push({ pathname: "/activity/[id]", params: { id: sourceActivityId } });
-  }, [detail?.post.source_tennis_activity_id, postId, requireAuth, router]);
-
-  const confirmDelete = useCallback(() => {
-    if (!postId || !accessToken || deleting) {
-      return;
-    }
-
-    Alert.alert("删除动态", "删除后将无法恢复，确定要删除吗？", [
-      { style: "cancel", text: "取消" },
-      {
-        style: "destructive",
-        text: "删除",
-        onPress: () => {
-          setDeleting(true);
-          void deletePost(accessToken, postId)
-            .then(() => {
-              clearPostDetailPreview(postId);
-              router.back();
-            })
-            .catch((deleteError) => Alert.alert("删除失败", detailErrorMessage(deleteError)))
-            .finally(() => setDeleting(false));
-        },
-      },
-    ]);
-  }, [accessToken, deleting, postId, router]);
+  }, [activePostId, detail?.post.source_tennis_activity_id, requireAuth, router]);
 
   if ((status === "loading" || loading) && !detail) {
     return <StateScreen loading message="正在加载动态..." onBack={() => router.back()} />;
@@ -365,6 +617,7 @@ export default function PostDetailScreen() {
   const content = detail.post.title ? detail.post.content : null;
   const firstVideo = detail.videos[0] ?? null;
   const avatarUri = resolveMediaUrl(detail.author.avatar_path);
+  const initialIndex = Math.max(0, postIds.findIndex((value) => value === initialPostId));
 
   return (
     <KeyboardAvoidingView
@@ -372,7 +625,33 @@ export default function PostDetailScreen() {
       style={styles.screen}
     >
       <StatusBar style="light" />
-      <PostVideoStage detail={detail} />
+      <FlatList
+        data={postIds}
+        decelerationRate="fast"
+        getItemLayout={(_, index) => ({
+          index,
+          length: windowHeight,
+          offset: windowHeight * index,
+        })}
+        initialNumToRender={2}
+        initialScrollIndex={initialIndex}
+        keyExtractor={(itemValue) => itemValue}
+        maxToRenderPerBatch={2}
+        onViewableItemsChanged={onStreamViewableItemsChanged}
+        pagingEnabled
+        ref={detailListRef}
+        renderItem={({ item: itemPostId }) => (
+          <PostStreamPage
+            active={itemPostId === activePostId}
+            detail={itemPostId === activePostId ? detail : peekPostDetailPreview(itemPostId)}
+            height={windowHeight}
+            onPlayingChange={itemPostId === activePostId ? handleVideoPlayingChange : undefined}
+          />
+        )}
+        showsVerticalScrollIndicator={false}
+        viewabilityConfig={streamViewabilityConfig}
+        windowSize={3}
+      />
 
       <SafeAreaView edges={["top", "left", "right"]} pointerEvents="box-none" style={styles.overlay}>
         <View style={styles.topBar}>
@@ -388,21 +667,6 @@ export default function PostDetailScreen() {
             <View style={styles.refreshBadge}>
               <ActivityIndicator color={colors.inverse} size="small" />
             </View>
-          ) : null}
-          {detail.post.author_user_id === userId ? (
-            <Pressable
-              accessibilityLabel="删除动态"
-              accessibilityRole="button"
-              disabled={deleting}
-              onPress={confirmDelete}
-              style={styles.iconButton}
-            >
-              {deleting ? (
-                <ActivityIndicator color={colors.inverse} size="small" />
-              ) : (
-                <Ionicons color={colors.inverse} name="trash-outline" size={21} />
-              )}
-            </Pressable>
           ) : null}
         </View>
 
@@ -427,6 +691,12 @@ export default function PostDetailScreen() {
             label={formatCount(stats?.favorite_count)}
             onPress={toggleFavorite}
             tone="gold"
+          />
+          <ActionButton
+            disabled={interactionPending === "share"}
+            icon="paper-plane-outline"
+            label={formatCount(stats?.share_count)}
+            onPress={() => void openShare()}
           />
           {detail.post.source_tennis_activity_id ? (
             <ActionButton
@@ -470,21 +740,82 @@ export default function PostDetailScreen() {
       {commentsOpen ? (
         <CommentsPanel
           comments={comments}
+          count={stats?.comment_count ?? 0}
+          currentUserId={userId}
           draft={commentDraft}
+          expandedReplies={expandedReplies}
           error={commentsError}
+          hasMore={commentsHasMore}
           loading={commentsLoading}
+          loadingMore={commentsLoadingMore}
+          onDelete={deleteComment}
+          onLoadMore={loadMoreComments}
           onChangeDraft={setCommentDraft}
           onClose={() => setCommentsOpen(false)}
+          onLoadReplies={toggleReplies}
+          onReply={setReplyTarget}
           onRetry={loadComments}
           onSubmit={submitComment}
+          replyTarget={replyTarget}
           submitting={commentSubmitting}
+        />
+      ) : null}
+      {shareOpen ? (
+        <SharePanel
+          conversations={conversations}
+          error={shareError}
+          loading={shareLoading}
+          onClose={() => setShareOpen(false)}
+          onRetry={openShare}
+          onShare={shareToConversation}
         />
       ) : null}
     </KeyboardAvoidingView>
   );
 }
 
-function PostVideoStage({ detail }: { detail: PostDetailResponse }) {
+function PostStreamPage({
+  active,
+  detail,
+  height,
+  onPlayingChange,
+}: {
+  active: boolean;
+  detail: PostDetailResponse | null;
+  height: number;
+  onPlayingChange?: (isPlaying: boolean) => void;
+}) {
+  if (active && detail && onPlayingChange) {
+    return (
+      <View style={[styles.streamPage, { height }]}>
+        <PostVideoStage detail={detail} onPlayingChange={onPlayingChange} />
+      </View>
+    );
+  }
+
+  const preview = detail ? previewUri(detail) : null;
+  return (
+    <View style={[styles.streamPage, styles.streamPlaceholder, { height }]}>
+      {preview ? (
+        <Image contentFit="cover" source={{ uri: preview }} style={styles.stageMedia} />
+      ) : (
+        <View style={[styles.stageMedia, styles.emptyStage]}>
+          <ActivityIndicator color={colors.inverse} />
+          <Text style={styles.emptyStageTitle}>正在准备视频</Text>
+        </View>
+      )}
+      <View style={styles.videoScrim} />
+    </View>
+  );
+}
+
+function PostVideoStage({
+  detail,
+  onPlayingChange,
+}: {
+  detail: PostDetailResponse;
+  onPlayingChange: (isPlaying: boolean) => void;
+}) {
   const firstVideo = detail.videos[0] ?? null;
   const preview = previewUri(detail);
   const videoUri =
@@ -504,6 +835,7 @@ function PostVideoStage({ detail }: { detail: PostDetailResponse }) {
     };
   }, [videoTitle, videoUri]);
   const [playing, setPlaying] = useState(Boolean(source));
+  const [playerStatus, setPlayerStatus] = useState<"loading" | "ready">(source ? "loading" : "ready");
   const player = useVideoPlayer(source, (instance) => {
     instance.loop = true;
     if (source) {
@@ -514,6 +846,10 @@ function PostVideoStage({ detail }: { detail: PostDetailResponse }) {
   useEffect(() => {
     setPlaying(Boolean(source));
   }, [source]);
+
+  useEffect(() => {
+    onPlayingChange(playing);
+  }, [onPlayingChange, playing]);
 
   const togglePlayback = useCallback(() => {
     if (!source) {
@@ -528,12 +864,17 @@ function PostVideoStage({ detail }: { detail: PostDetailResponse }) {
     setPlaying(true);
   }, [player, playing, source]);
 
+  const onFirstFrameRender = useCallback(() => {
+    setPlayerStatus("ready");
+  }, []);
+
   return (
     <Pressable onPress={togglePlayback} style={styles.stage}>
       {source ? (
         <VideoView
           contentFit="cover"
           nativeControls={false}
+          onFirstFrameRender={onFirstFrameRender}
           player={player}
           style={styles.stageMedia}
         />
@@ -546,6 +887,12 @@ function PostVideoStage({ detail }: { detail: PostDetailResponse }) {
         </View>
       )}
       <View style={styles.videoScrim} />
+      {playerStatus === "loading" && source ? (
+        <View style={styles.statusBadge}>
+          <ActivityIndicator color={colors.inverse} size="small" />
+          <Text style={styles.statusText}>加载中</Text>
+        </View>
+      ) : null}
       {source && !playing ? (
         <View style={styles.playOverlay}>
           <Ionicons color={colors.inverse} name="play" size={34} />
@@ -595,29 +942,49 @@ function ActionButton({
 
 function CommentsPanel({
   comments,
+  count,
+  currentUserId,
   draft,
+  expandedReplies,
   error,
+  hasMore,
   loading,
+  loadingMore,
+  onDelete,
+  onLoadMore,
+  onLoadReplies,
   onChangeDraft,
   onClose,
+  onReply,
   onRetry,
   onSubmit,
+  replyTarget,
   submitting,
 }: {
   comments: PostCommentRecord[];
+  count: number;
+  currentUserId: string | null;
   draft: string;
+  expandedReplies: Record<string, PostCommentRecord[]>;
   error: string | null;
+  hasMore: boolean;
   loading: boolean;
+  loadingMore: boolean;
+  onDelete: (comment: PostCommentRecord) => void;
+  onLoadMore: () => void;
+  onLoadReplies: (commentId: string) => void;
   onChangeDraft: (value: string) => void;
   onClose: () => void;
+  onReply: (comment: PostCommentRecord | null) => void;
   onRetry: () => void;
   onSubmit: () => void;
+  replyTarget: PostCommentRecord | null;
   submitting: boolean;
 }) {
   return (
     <SafeAreaView edges={["bottom", "left", "right"]} style={styles.commentsWrap}>
       <View style={styles.commentsHeader}>
-        <Text style={styles.commentsTitle}>评论 {formatCount(comments.length)}</Text>
+        <Text style={styles.commentsTitle}>评论 {formatCount(count)}</Text>
         <Pressable accessibilityLabel="关闭评论" accessibilityRole="button" onPress={onClose}>
           <Ionicons color={colors.inverse} name="close" size={22} />
         </Pressable>
@@ -627,6 +994,7 @@ function CommentsPanel({
         contentContainerStyle={styles.commentList}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        style={styles.commentScroll}
       >
         {loading ? (
           <View style={styles.commentState}>
@@ -644,44 +1012,191 @@ function CommentsPanel({
           <Text style={styles.emptyCommentText}>还没有评论</Text>
         ) : null}
         {comments.map((comment) => (
-          <View key={comment.comment_id} style={styles.commentRow}>
+          <View key={comment.comment_id}>
+            <View style={styles.commentRow}>
             <Avatar
               name={comment.author.nickname}
               size={32}
               uri={resolveMediaUrl(comment.author.avatar_path)}
             />
             <View style={styles.commentTextBlock}>
-              <Text numberOfLines={1} style={styles.commentAuthor}>
-                {comment.author.nickname}
-              </Text>
+              <View style={styles.commentHeaderLine}>
+                <Text numberOfLines={1} style={styles.commentAuthor}>
+                  {comment.author.nickname}
+                </Text>
+                {currentUserId &&
+                (currentUserId === comment.author_user_id ||
+                  currentUserId === comment.author.user_id) ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => onDelete(comment)}
+                  >
+                    <Text style={styles.commentActionText}>删除</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text style={styles.commentContent}>{comment.content}</Text>
+              <View style={styles.commentActions}>
+                <Pressable accessibilityRole="button" onPress={() => onReply(comment)}>
+                  <Text style={styles.commentActionText}>回复</Text>
+                </Pressable>
+                {comment.reply_count > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => onLoadReplies(comment.comment_id)}
+                  >
+                    <Text style={styles.commentActionText}>
+                      {expandedReplies[comment.comment_id] ? "收起回复" : `查看回复 ${comment.reply_count}`}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
+            </View>
+            {expandedReplies[comment.comment_id]?.map((reply) => (
+              <View key={reply.comment_id} style={styles.replyRow}>
+                <Avatar
+                  name={reply.author.nickname}
+                  size={26}
+                  uri={resolveMediaUrl(reply.author.avatar_path)}
+                />
+                <View style={styles.commentTextBlock}>
+                  <View style={styles.commentHeaderLine}>
+                    <Text numberOfLines={1} style={styles.commentAuthor}>
+                      {reply.author.nickname}
+                    </Text>
+                    {currentUserId && currentUserId === reply.author_user_id ? (
+                      <Pressable accessibilityRole="button" onPress={() => onDelete(reply)}>
+                        <Text style={styles.commentActionText}>删除</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <Text style={styles.commentContent}>{reply.content}</Text>
+                </View>
+              </View>
+            ))}
           </View>
         ))}
+        {loadingMore ? (
+          <View style={styles.commentState}>
+            <ActivityIndicator color={colors.inverse} />
+            <Text style={styles.commentStateText}>正在加载更多评论</Text>
+          </View>
+        ) : null}
+        {!loading && !error && hasMore ? (
+          <Pressable accessibilityRole="button" onPress={onLoadMore} style={styles.loadMoreButton}>
+            <Text style={styles.commentActionText}>加载更多评论</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <View style={styles.commentComposer}>
-        <TextInput
-          onChangeText={onChangeDraft}
-          placeholder="写评论..."
-          placeholderTextColor="rgba(255,255,255,0.52)"
-          returnKeyType="send"
-          style={styles.commentInput}
-          value={draft}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={submitting || !draft.trim()}
-          onPress={onSubmit}
-          style={[styles.sendButton, (!draft.trim() || submitting) && styles.sendButtonDisabled]}
-        >
-          {submitting ? (
-            <ActivityIndicator color={colors.inverse} size="small" />
-          ) : (
-            <Ionicons color={colors.inverse} name="send" size={18} />
-          )}
+        {replyTarget ? (
+          <View style={styles.replyTargetBar}>
+            <Text numberOfLines={1} style={styles.replyTargetText}>
+              回复 @{replyTarget.author.nickname}
+            </Text>
+            <Pressable accessibilityRole="button" onPress={() => onReply(null)}>
+              <Ionicons color={colors.inverse} name="close-circle-outline" size={18} />
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={styles.composerRow}>
+          <TextInput
+            onChangeText={onChangeDraft}
+            placeholder={replyTarget ? `回复 ${replyTarget.author.nickname}...` : "写评论..."}
+            placeholderTextColor="rgba(255,255,255,0.52)"
+            returnKeyType="send"
+            style={styles.commentInput}
+            value={draft}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={submitting || !draft.trim()}
+            onPress={onSubmit}
+            style={[styles.sendButton, (!draft.trim() || submitting) && styles.sendButtonDisabled]}
+          >
+            {submitting ? (
+              <ActivityIndicator color={colors.inverse} size="small" />
+            ) : (
+              <Ionicons color={colors.inverse} name="send" size={18} />
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function SharePanel({
+  conversations,
+  error,
+  loading,
+  onClose,
+  onRetry,
+  onShare,
+}: {
+  conversations: ConversationListItem[];
+  error: string | null;
+  loading: boolean;
+  onClose: () => void;
+  onRetry: () => void;
+  onShare: (conversationId: string) => void;
+}) {
+  return (
+    <SafeAreaView edges={["bottom", "left", "right"]} style={styles.shareWrap}>
+      <View style={styles.commentsHeader}>
+        <Text style={styles.commentsTitle}>分享到站内会话</Text>
+        <Pressable accessibilityLabel="关闭分享" accessibilityRole="button" onPress={onClose}>
+          <Ionicons color={colors.inverse} name="close" size={22} />
         </Pressable>
       </View>
+      {loading ? (
+        <View style={styles.commentState}>
+          <ActivityIndicator color={colors.inverse} />
+          <Text style={styles.commentStateText}>正在加载会话</Text>
+        </View>
+      ) : null}
+      {error ? (
+        <Pressable accessibilityRole="button" onPress={onRetry} style={styles.commentState}>
+          <Ionicons color={colors.clay} name="refresh-outline" size={20} />
+          <Text style={styles.commentStateText}>{error}</Text>
+        </Pressable>
+      ) : null}
+      {!loading && !error && conversations.length === 0 ? (
+        <Text style={styles.emptyCommentText}>暂无可分享的站内会话</Text>
+      ) : null}
+      <ScrollView
+        contentContainerStyle={styles.commentList}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {conversations.map((item) => {
+          const name =
+            item.conversation.title ??
+            item.other_members.map((member) => member.nickname).join("、") ??
+            "站内会话";
+          return (
+            <Pressable
+              accessibilityRole="button"
+              key={item.conversation.conversation_id}
+              onPress={() => onShare(item.conversation.conversation_id)}
+              style={styles.conversationRow}
+            >
+              <Avatar name={name} size={38} uri={resolveMediaUrl(item.conversation.avatar_path)} />
+              <View style={styles.commentTextBlock}>
+                <Text numberOfLines={1} style={styles.conversationTitle}>
+                  {name}
+                </Text>
+                <Text numberOfLines={1} style={styles.commentStateText}>
+                  {item.conversation.last_message_preview ?? "点击分享这条动态"}
+                </Text>
+              </View>
+              <Ionicons color={colors.inverse} name="paper-plane-outline" size={18} />
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -736,6 +1251,14 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#050607",
   },
+  streamPage: {
+    backgroundColor: "#050607",
+    overflow: "hidden",
+    width: "100%",
+  },
+  streamPlaceholder: {
+    position: "relative",
+  },
   stageMedia: {
     height: "100%",
     width: "100%",
@@ -766,6 +1289,23 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: "50%",
     width: 68,
+  },
+  statusBadge: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.36)",
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: 8,
+    left: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    position: "absolute",
+    top: "48%",
+  },
+  statusText: {
+    color: colors.inverse,
+    fontSize: 12,
+    fontWeight: "800",
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -878,6 +1418,19 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.card,
     borderTopRightRadius: radius.card,
     bottom: 0,
+    height: "58%",
+    left: 0,
+    overflow: "hidden",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    position: "absolute",
+    right: 0,
+  },
+  shareWrap: {
+    backgroundColor: "rgba(13,15,17,0.98)",
+    borderTopLeftRadius: radius.card,
+    borderTopRightRadius: radius.card,
+    bottom: 0,
     left: 0,
     maxHeight: "58%",
     paddingHorizontal: 16,
@@ -895,6 +1448,10 @@ const styles = StyleSheet.create({
     color: colors.inverse,
     fontSize: 16,
     fontWeight: "900",
+  },
+  commentScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   commentList: {
     gap: 14,
@@ -929,6 +1486,34 @@ const styles = StyleSheet.create({
     gap: 4,
     minWidth: 0,
   },
+  commentHeaderLine: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "space-between",
+  },
+  commentActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 16,
+    marginTop: 3,
+  },
+  commentActionText: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  replyRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginLeft: 42,
+    marginTop: 10,
+  },
+  loadMoreButton: {
+    alignItems: "center",
+    minHeight: 42,
+    justifyContent: "center",
+  },
   commentAuthor: {
     color: "rgba(255,255,255,0.68)",
     fontSize: 12,
@@ -941,12 +1526,31 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   commentComposer: {
-    alignItems: "center",
+    alignItems: "stretch",
     borderTopColor: "rgba(255,255,255,0.12)",
     borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "column",
+    flexShrink: 0,
+    paddingTop: 10,
+  },
+  composerRow: {
+    alignItems: "center",
     flexDirection: "row",
     gap: 8,
-    paddingTop: 10,
+  },
+  replyTargetBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: 7,
+    width: "100%",
+  },
+  replyTargetText: {
+    color: "rgba(255,255,255,0.66)",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    marginRight: 10,
   },
   commentInput: {
     backgroundColor: "rgba(255,255,255,0.1)",
@@ -968,6 +1572,17 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.48,
+  },
+  conversationRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 52,
+  },
+  conversationTitle: {
+    color: colors.inverse,
+    fontSize: 14,
+    fontWeight: "900",
   },
   stateScreen: {
     backgroundColor: "#050607",

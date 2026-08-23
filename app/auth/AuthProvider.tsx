@@ -25,6 +25,7 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 type AuthContextValue = {
   accessToken: string | null;
+  clearExpiredLogin: () => Promise<void>;
   isAuthenticated: boolean;
   loginWithPhone: (phone: string, code: string) => Promise<User>;
   logout: () => Promise<void>;
@@ -308,6 +309,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(
     () => ({
       accessToken: session?.accessToken ?? null,
+      clearExpiredLogin: clearSession,
       isAuthenticated: status === "authenticated",
       loginWithPhone,
       logout,
@@ -320,7 +322,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user: session?.user ?? null,
       userId: session?.user.user_id ?? null,
     }),
-    [loginWithPhone, logout, refreshLogin, requestVerificationCode, session, status, uploadAvatar, updateProfile],
+    [
+      clearSession,
+      loginWithPhone,
+      logout,
+      refreshLogin,
+      requestVerificationCode,
+      session,
+      status,
+      uploadAvatar,
+      updateProfile,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
