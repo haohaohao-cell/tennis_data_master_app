@@ -158,6 +158,7 @@ app.post_detail.comments_panel
 | --- | --- | --- | --- |
 | `app.messages` | 消息页 | screen | 消息中心主页面 |
 | `app.messages.view_switcher` | 消息视图切换区 | section | 通知 / 聊天 / 请求 |
+| `app.messages.notification_category_switcher` | 通知分类切换区 | section | 互动关注 / 课程系统 |
 | `app.messages.notification_list` | 通知列表 | list | 系统通知与互动通知 |
 | `app.messages.conversation_list` | 会话列表 | list | 私信和群聊会话 |
 | `app.messages.request_list` | 请求列表 | list | 消息请求列表 |
@@ -281,6 +282,10 @@ app.post_detail.comments_panel
 | `app.chat.header` | 会话头部 | section | 头像、会话名、返回区 |
 | `app.chat.message_timeline` | 消息时间线 | list | 历史消息与滚动加载 |
 | `app.chat.composer` | 输入区 | section | 文本输入与发送区 |
+| `app.chat.reply_composer_preview` | 回复预览区 | section | 当前回复目标、摘要与取消操作 |
+| `app.chat.quote_preview` | 引用预览 | component | 消息气泡中的引用摘要与定位入口 |
+| `app.chat.recall_action` | 撤回消息操作 | action | Direct 自有文字消息的撤回入口 |
+| `app.chat.recalled_tombstone` | 已撤回消息占位 | component | 撤回消息的中性展示 |
 | `app.chat.loading_state` | 聊天加载状态 | state | 会话加载中 |
 
 ## 球友搜索
