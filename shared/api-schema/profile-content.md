@@ -24,7 +24,11 @@ Response:
     "posts": 1,
     "matches": 0,
     "training": 1,
-    "courses": 0
+    "courses": 0,
+    "received_like_count": 12,
+    "friend_count": 2,
+    "following_count": 5,
+    "follower_count": 8
   },
   "posts": [
     {
@@ -120,6 +124,10 @@ Tab rules:
 - `matches`: owned `tennis_activities` where `activity_type = match`.
 - `training`: owned `tennis_activities` where `activity_type <> match`; no-video training records are included immediately, and uploaded video activities are included as soon as the upload is completed.
 - `courses`: lessons where the current user is either `lessons.coach_user_id` or an active `lesson_students.student_user_id`.
+- `received_like_count`: total likes received by the current user's non-deleted Posts.
+- `friend_count`: active mutual-follow relationships for the current user.
+- `following_count`: active accounts followed by the current user.
+- `follower_count`: active accounts following the current user.
 - Post and Activity previews should use `first_image_path`, `first_video_thumbnail_path`, or `first_video.thumbnail_path`; uploaded videos are expected to have a thumbnail path.
 - Activity previews include `location` for the current user. Exact location fields are available because this endpoint only returns the current user's own activity records.
 
