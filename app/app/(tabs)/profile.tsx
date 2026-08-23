@@ -21,7 +21,10 @@ import { ApiError } from "@/api/client";
 import { formatActivityLocation } from "@/api/location";
 import { resolveMediaUrl } from "@/api/activityDetail";
 import { deleteActivity } from "@/api/uploads";
-import { clearPostDetailPreview, primePostDetailPreview } from "@/api/postDetailPreviewCache";
+import {
+  clearPostDetailPreview,
+  primePostDetailPreview,
+} from "@/api/postDetailPreviewCache";
 import {
   deletePost,
   getMyPostCollection,
@@ -52,7 +55,14 @@ import { coachCourses, pendingVideos, students } from "@/data/mockData";
 import { colors, radius } from "@/theme";
 
 type ProfileMode = "player" | "coach";
-type PlayerTab = "posts" | "matches" | "training" | "courses" | "saved" | "liked" | "data";
+type PlayerTab =
+  | "posts"
+  | "matches"
+  | "training"
+  | "courses"
+  | "saved"
+  | "liked"
+  | "data";
 type PostVisibilityFilter = "all" | "public" | "private";
 type PopoverAnchor = {
   right: number;
@@ -100,11 +110,17 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { accessToken, isAuthenticated, status } = useAuth();
   const [mode, setMode] = useState<ProfileMode>("player");
-  const [coachIdentity, setCoachIdentity] = useState<CoachIdentity | null>(null);
+  const [coachIdentity, setCoachIdentity] = useState<CoachIdentity | null>(
+    null,
+  );
   const [coachLoading, setCoachLoading] = useState(false);
-  const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
+  const [profileContent, setProfileContent] = useState<ProfileContent | null>(
+    null,
+  );
   const [profileContentLoading, setProfileContentLoading] = useState(false);
-  const [profileContentError, setProfileContentError] = useState<string | null>(null);
+  const [profileContentError, setProfileContentError] = useState<string | null>(
+    null,
+  );
 
   const loadCoachIdentity = useCallback(async () => {
     if (!accessToken) {
@@ -185,7 +201,10 @@ export default function ProfileScreen() {
           onRefreshContent={loadProfileContent}
         />
       ) : (
-        <CoachWorkspace coachIdentity={coachIdentity} onSwitchToPlayer={() => setMode("player")} />
+        <CoachWorkspace
+          coachIdentity={coachIdentity}
+          onSwitchToPlayer={() => setMode("player")}
+        />
       )}
     </ScrollPage>
   );
@@ -264,7 +283,9 @@ function PlayerProfile({
   const [menuOpen, setMenuOpen] = useState(false);
   const { user } = useAuth();
   const profileCompleted = Boolean(user?.profile_completed);
-  const displayName = profileCompleted ? (user?.nickname ?? "网球用户") : "网球用户";
+  const displayName = profileCompleted
+    ? (user?.nickname ?? "网球用户")
+    : "网球用户";
 
   const openSocialList = useCallback(
     (kind: "friends" | "following" | "followers") => {
@@ -283,7 +304,11 @@ function PlayerProfile({
     <View style={styles.profileBody}>
       <View style={styles.playerHeaderRow}>
         <View style={styles.playerHero}>
-          <Avatar name={displayName} size={72} uri={resolveMediaUrl(user?.avatar_path)} />
+          <Avatar
+            name={displayName}
+            size={72}
+            uri={resolveMediaUrl(user?.avatar_path)}
+          />
           <View style={styles.playerInfo}>
             <View style={styles.nameLine}>
               <Text style={styles.playerName}>{displayName}</Text>
@@ -295,6 +320,24 @@ function PlayerProfile({
                 <Pill>{profileCompleted ? "资料已完善" : "资料待完善"}</Pill>
               </Pressable>
             </View>
+            <Pressable
+              accessibilityLabel="教练身份转换"
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({
+                  pathname: "/create-placeholder",
+                  params: { type: "教练身份转换" },
+                })
+              }
+              style={styles.coachIdentityEntry}
+            >
+              <Ionicons
+                color={colors.accentDeep}
+                name="swap-horizontal-outline"
+                size={15}
+              />
+              <Text style={styles.coachIdentityEntryText}>教练身份转换</Text>
+            </Pressable>
           </View>
         </View>
         <View style={styles.headerActions}>
@@ -308,7 +351,11 @@ function PlayerProfile({
               {coachLoading ? (
                 <ActivityIndicator color={colors.accentDeep} size="small" />
               ) : (
-                <Ionicons color={colors.accentDeep} name="school-outline" size={16} />
+                <Ionicons
+                  color={colors.accentDeep}
+                  name="school-outline"
+                  size={16}
+                />
               )}
               <Text style={styles.modeButtonText}>教练入口</Text>
             </Pressable>
@@ -326,23 +373,45 @@ function PlayerProfile({
 
       <View style={styles.socialOverview}>
         <View style={styles.socialMetricGrid}>
-          <View style={styles.socialMetric}>
-            <View style={[styles.socialMetricIcon, styles.socialMetricIconLikes]}>
+          <Pressable
+            accessibilityLabel="查看获赞总数"
+            accessibilityRole="button"
+            onPress={() =>
+              Alert.alert(
+                "获赞",
+                `共获得 ${content?.stats.received_like_count ?? 0} 个赞`,
+              )
+            }
+            style={styles.socialMetric}
+          >
+            <View
+              style={[styles.socialMetricIcon, styles.socialMetricIconLikes]}
+            >
               <Ionicons color={colors.clay} name="heart-outline" size={16} />
             </View>
-            <Text style={styles.socialMetricValue}>{content?.stats.received_like_count ?? 0}</Text>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.received_like_count ?? 0}
+            </Text>
             <Text style={styles.socialMetricLabel}>获赞</Text>
-          </View>
+          </Pressable>
           <Pressable
             accessibilityLabel="查看互关列表"
             accessibilityRole="button"
             onPress={() => openSocialList("friends")}
             style={styles.socialMetric}
           >
-            <View style={[styles.socialMetricIcon, styles.socialMetricIconFriends]}>
-              <Ionicons color={colors.accentDeep} name="people-outline" size={16} />
+            <View
+              style={[styles.socialMetricIcon, styles.socialMetricIconFriends]}
+            >
+              <Ionicons
+                color={colors.accentDeep}
+                name="people-outline"
+                size={16}
+              />
             </View>
-            <Text style={styles.socialMetricValue}>{content?.stats.friend_count ?? 0}</Text>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.friend_count ?? 0}
+            </Text>
             <Text style={styles.socialMetricLabel}>互关</Text>
           </Pressable>
           <Pressable
@@ -351,10 +420,21 @@ function PlayerProfile({
             onPress={() => openSocialList("following")}
             style={styles.socialMetric}
           >
-            <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowing]}>
-              <Ionicons color={colors.gold} name="add-circle-outline" size={16} />
+            <View
+              style={[
+                styles.socialMetricIcon,
+                styles.socialMetricIconFollowing,
+              ]}
+            >
+              <Ionicons
+                color={colors.gold}
+                name="add-circle-outline"
+                size={16}
+              />
             </View>
-            <Text style={styles.socialMetricValue}>{content?.stats.following_count ?? 0}</Text>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.following_count ?? 0}
+            </Text>
             <Text style={styles.socialMetricLabel}>关注</Text>
           </Pressable>
           <Pressable
@@ -363,10 +443,21 @@ function PlayerProfile({
             onPress={() => openSocialList("followers")}
             style={styles.socialMetric}
           >
-            <View style={[styles.socialMetricIcon, styles.socialMetricIconFollowers]}>
-              <Ionicons color={colors.sky} name="person-add-outline" size={16} />
+            <View
+              style={[
+                styles.socialMetricIcon,
+                styles.socialMetricIconFollowers,
+              ]}
+            >
+              <Ionicons
+                color={colors.sky}
+                name="person-add-outline"
+                size={16}
+              />
             </View>
-            <Text style={styles.socialMetricValue}>{content?.stats.follower_count ?? 0}</Text>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.follower_count ?? 0}
+            </Text>
             <Text style={styles.socialMetricLabel}>粉丝</Text>
           </Pressable>
         </View>
@@ -399,7 +490,12 @@ function PlayerProfile({
                 name={tab.icon as IconName}
                 size={17}
               />
-              <Text style={[styles.playerTabText, selected && styles.playerTabTextActive]}>
+              <Text
+                style={[
+                  styles.playerTabText,
+                  selected && styles.playerTabTextActive,
+                ]}
+              >
                 {tab.label}
               </Text>
             </Pressable>
@@ -427,14 +523,21 @@ function PlayerProfile({
 }
 
 function isActiveCoachIdentity(identity: CoachIdentity | null) {
-  return identity?.status === "certified_coach" || identity?.status === "non_professional_coach";
+  return (
+    identity?.status === "certified_coach" ||
+    identity?.status === "non_professional_coach"
+  );
 }
 
 function coachMenuSubtitle(identity: CoachIdentity | null, loading: boolean) {
   if (loading) {
     return "正在同步";
   }
-  if (!identity || identity.status === "normal_user" || identity.status === "coach_revoked") {
+  if (
+    !identity ||
+    identity.status === "normal_user" ||
+    identity.status === "coach_revoked"
+  ) {
     return "申请入口";
   }
   if (identity.status === "pending_review") {
@@ -491,14 +594,25 @@ function ProfileMenuDrawer({
     return animation.stop;
   }, [translateX, visible, width]);
 
-  function open(pathname: "/profile/edit" | "/profile/settings" | "/profile/coach-apply") {
+  function open(
+    pathname: "/profile/edit" | "/profile/settings" | "/profile/coach-apply",
+  ) {
     onClose();
     router.push(pathname);
   }
 
   return (
-    <Modal animationType="none" onRequestClose={onClose} transparent visible={mounted}>
-      <Pressable accessibilityRole="button" onPress={onClose} style={styles.drawerBackdrop}>
+    <Modal
+      animationType="none"
+      onRequestClose={onClose}
+      transparent
+      visible={mounted}
+    >
+      <Pressable
+        accessibilityRole="button"
+        onPress={onClose}
+        style={styles.drawerBackdrop}
+      >
         <Animated.View
           onStartShouldSetResponder={() => true}
           style={[styles.sideDrawer, { transform: [{ translateX }] }]}
@@ -555,10 +669,20 @@ function ProfileStat({
 }) {
   return (
     <View style={styles.profileStat}>
-      <Text style={[styles.profileStatValue, inverse && styles.profileStatValueInverse]}>
+      <Text
+        style={[
+          styles.profileStatValue,
+          inverse && styles.profileStatValueInverse,
+        ]}
+      >
         {value}
       </Text>
-      <Text style={[styles.profileStatLabel, inverse && styles.profileStatLabelInverse]}>
+      <Text
+        style={[
+          styles.profileStatLabel,
+          inverse && styles.profileStatLabelInverse,
+        ]}
+      >
         {label}
       </Text>
     </View>
@@ -582,10 +706,14 @@ function PlayerTabContent({
 }) {
   const router = useRouter();
   const { accessToken } = useAuth();
-  const [deletingContentId, setDeletingContentId] = useState<string | null>(null);
-  const [postVisibilityFilter, setPostVisibilityFilter] = useState<PostVisibilityFilter>("all");
+  const [deletingContentId, setDeletingContentId] = useState<string | null>(
+    null,
+  );
+  const [postVisibilityFilter, setPostVisibilityFilter] =
+    useState<PostVisibilityFilter>("all");
   const [postFilterOpen, setPostFilterOpen] = useState(false);
-  const [postFilterAnchor, setPostFilterAnchor] = useState<PopoverAnchor | null>(null);
+  const [postFilterAnchor, setPostFilterAnchor] =
+    useState<PopoverAnchor | null>(null);
   const postFilterButtonRef = useRef<View>(null);
   const { width: windowWidth } = useWindowDimensions();
   const [collectionStates, setCollectionStates] = useState<
@@ -619,7 +747,10 @@ function PlayerTabContent({
         return;
       }
       const current = collectionStatesRef.current[collection];
-      if (current.loading || (append && (!current.hasMore || !current.nextCursor))) {
+      if (
+        current.loading ||
+        (append && (!current.hasMore || !current.nextCursor))
+      ) {
         return;
       }
 
@@ -687,7 +818,9 @@ function PlayerTabContent({
         }
         updateCollectionState(collection, (previous) => ({
           ...previous,
-          items: previous.items.filter((item) => item.post.social_post_id !== socialPostId),
+          items: previous.items.filter(
+            (item) => item.post.social_post_id !== socialPostId,
+          ),
         }));
       } catch (error) {
         updateCollectionState(collection, (previous) => ({
@@ -710,10 +843,13 @@ function PlayerTabContent({
     });
   }, [windowWidth]);
 
-  const selectPostVisibilityFilter = useCallback((filter: PostVisibilityFilter) => {
-    setPostVisibilityFilter(filter);
-    setPostFilterOpen(false);
-  }, []);
+  const selectPostVisibilityFilter = useCallback(
+    (filter: PostVisibilityFilter) => {
+      setPostVisibilityFilter(filter);
+      setPostFilterOpen(false);
+    },
+    [],
+  );
 
   const deleteOwnedPost = useCallback(
     (socialPostId: string) => {
@@ -732,7 +868,9 @@ function PlayerTabContent({
                 clearPostDetailPreview(socialPostId);
                 await onRefreshContent();
               })
-              .catch((error) => Alert.alert("删除失败", profileContentErrorMessage(error)))
+              .catch((error) =>
+                Alert.alert("删除失败", profileContentErrorMessage(error)),
+              )
               .finally(() => setDeletingContentId(null));
           },
         },
@@ -755,7 +893,9 @@ function PlayerTabContent({
             setDeletingContentId(tennisActivityId);
             void deleteActivity(accessToken, tennisActivityId)
               .then(() => onRefreshContent())
-              .catch((error) => Alert.alert("删除失败", profileContentErrorMessage(error)))
+              .catch((error) =>
+                Alert.alert("删除失败", profileContentErrorMessage(error)),
+              )
               .finally(() => setDeletingContentId(null));
           },
         },
@@ -793,14 +933,25 @@ function PlayerTabContent({
               accessibilityRole="button"
               accessibilityState={{ expanded: postFilterOpen }}
               onPress={openPostFilter}
-              style={[styles.postFilterButton, postVisibilityFilter !== "all" && styles.postFilterButtonActive]}
+              style={[
+                styles.postFilterButton,
+                postVisibilityFilter !== "all" && styles.postFilterButtonActive,
+              ]}
             >
               <Ionicons
-                color={postVisibilityFilter === "all" ? colors.ink : colors.accentDeep}
-                name={postVisibilityFilter === "all" ? "funnel-outline" : "funnel"}
+                color={
+                  postVisibilityFilter === "all"
+                    ? colors.ink
+                    : colors.accentDeep
+                }
+                name={
+                  postVisibilityFilter === "all" ? "funnel-outline" : "funnel"
+                }
                 size={18}
               />
-              {postVisibilityFilter !== "all" ? <View style={styles.postFilterIndicator} /> : null}
+              {postVisibilityFilter !== "all" ? (
+                <View style={styles.postFilterIndicator} />
+              ) : null}
             </Pressable>
           </View>
         </View>
@@ -850,12 +1001,17 @@ function PlayerTabContent({
       return <ContentError message={error} onRetry={onRetry} />;
     }
 
-    const activities = tab === "matches" ? content?.matches ?? [] : content?.training ?? [];
+    const activities =
+      tab === "matches" ? (content?.matches ?? []) : (content?.training ?? []);
     if (!activities.length) {
       return (
         <ContentEmpty
           icon={tab === "matches" ? "trophy-outline" : "fitness-outline"}
-          subtitle={tab === "matches" ? "记录或上传比赛后会显示在这里" : "刚上传的视频 activity 会显示在这里"}
+          subtitle={
+            tab === "matches"
+              ? "记录或上传比赛后会显示在这里"
+              : "刚上传的视频 activity 会显示在这里"
+          }
           title={tab === "matches" ? "还没有比赛" : "还没有训练视频"}
         />
       );
@@ -901,7 +1057,10 @@ function PlayerTabContent({
     return (
       <View style={styles.windowList}>
         {content.courses.map((lesson) => (
-          <ProfileLessonRow key={`${lesson.role}-${lesson.lesson_id}`} lesson={lesson} />
+          <ProfileLessonRow
+            key={`${lesson.role}-${lesson.lesson_id}`}
+            lesson={lesson}
+          />
         ))}
       </View>
     );
@@ -915,7 +1074,9 @@ function PlayerTabContent({
         emptyTitle="还没有收藏"
         onLoadMore={() => loadCollection("favorites", true)}
         onRefresh={() => loadCollection("favorites")}
-        onRemove={(socialPostId) => removeCollectionPost("favorites", socialPostId)}
+        onRemove={(socialPostId) =>
+          removeCollectionPost("favorites", socialPostId)
+        }
         removeLabel="取消收藏"
         state={collectionStates.favorites}
       />
@@ -947,7 +1108,9 @@ function PlayerTabContent({
         <View style={styles.dataBars}>
           {[74, 62, 86, 68].map((value, index) => (
             <View key={index} style={styles.dataBarRow}>
-              <Text style={styles.dataLabel}>{["发球", "接发", "底线", "移动"][index]}</Text>
+              <Text style={styles.dataLabel}>
+                {["发球", "接发", "底线", "移动"][index]}
+              </Text>
               <View style={styles.dataTrack}>
                 <View style={[styles.dataBar, { width: `${value}%` }]} />
               </View>
@@ -982,9 +1145,18 @@ function PostVisibilityFilterPopover({
   ];
 
   return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={visible}
+    >
       <View style={styles.postFilterBackdrop}>
-        <Pressable accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
+        <Pressable
+          accessibilityRole="button"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
         <View
           accessibilityViewIsModal
           style={[
@@ -1005,12 +1177,26 @@ function PostVisibilityFilterPopover({
                 accessibilityState={{ selected: isSelected }}
                 key={option.value}
                 onPress={() => onSelect(option.value)}
-                style={[styles.postFilterOption, isSelected && styles.postFilterOptionActive]}
+                style={[
+                  styles.postFilterOption,
+                  isSelected && styles.postFilterOptionActive,
+                ]}
               >
-                <Text style={[styles.postFilterOptionText, isSelected && styles.postFilterOptionTextActive]}>
+                <Text
+                  style={[
+                    styles.postFilterOptionText,
+                    isSelected && styles.postFilterOptionTextActive,
+                  ]}
+                >
                   {option.label}
                 </Text>
-                {isSelected ? <Ionicons color={colors.accentDeep} name="checkmark" size={18} /> : null}
+                {isSelected ? (
+                  <Ionicons
+                    color={colors.accentDeep}
+                    name="checkmark"
+                    size={18}
+                  />
+                ) : null}
               </Pressable>
             );
           })}
@@ -1046,7 +1232,13 @@ function PostCollectionGrid({
     return <ContentError message={state.error} onRetry={onRefresh} />;
   }
   if (state.items.length === 0) {
-    return <ContentEmpty icon={emptyIcon} subtitle={emptySubtitle} title={emptyTitle} />;
+    return (
+      <ContentEmpty
+        icon={emptyIcon}
+        subtitle={emptySubtitle}
+        title={emptyTitle}
+      />
+    );
   }
 
   return (
@@ -1064,7 +1256,11 @@ function PostCollectionGrid({
       {state.error ? (
         <View style={styles.collectionErrorPanel}>
           <Text style={styles.collectionErrorText}>{state.error}</Text>
-          <Pressable accessibilityRole="button" onPress={() => void onRefresh()} style={styles.retryButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void onRefresh()}
+            style={styles.retryButton}
+          >
             <Text style={styles.retryButtonText}>重试</Text>
           </Pressable>
         </View>
@@ -1076,7 +1272,10 @@ function PostCollectionGrid({
           onPress={() => {
             void onLoadMore();
           }}
-          style={[styles.loadMoreButton, state.loading && styles.loadMoreButtonDisabled]}
+          style={[
+            styles.loadMoreButton,
+            state.loading && styles.loadMoreButtonDisabled,
+          ]}
         >
           {state.loading ? (
             <ActivityIndicator color={colors.ink} size="small" />
@@ -1130,7 +1329,8 @@ function CollectionPostTile({
 function postDetailToProfilePost(detail: PostDetailResponse): ProfilePost {
   const firstMedia = detail.media[0] ?? null;
   const firstVideo = firstMedia?.video_id
-    ? detail.videos.find((video) => video.video_id === firstMedia.video_id) ?? null
+    ? (detail.videos.find((video) => video.video_id === firstMedia.video_id) ??
+      null)
     : null;
   return {
     content: detail.post.content,
@@ -1172,10 +1372,15 @@ function ProfilePostTile({
   previewDetail?: PostDetailResponse;
 }) {
   const router = useRouter();
-  const preview = resolveMediaUrl(post.first_image_path ?? post.first_video_thumbnail_path);
+  const preview = resolveMediaUrl(
+    post.first_image_path ?? post.first_video_thumbnail_path,
+  );
   const authorAvatarUri = resolveMediaUrl(authorAvatarPath);
-  const hasCollectionMeta = Boolean(authorName || likeCount !== undefined || favoriteCount !== undefined);
-  const isVideo = post.first_media_type === "video" || post.first_media_type === "video_clip";
+  const hasCollectionMeta = Boolean(
+    authorName || likeCount !== undefined || favoriteCount !== undefined,
+  );
+  const isVideo =
+    post.first_media_type === "video" || post.first_media_type === "video_clip";
 
   return (
     <Pressable
@@ -1193,7 +1398,11 @@ function ProfilePostTile({
     >
       <View style={styles.postTilePreview}>
         {preview ? (
-          <Image contentFit="cover" source={{ uri: preview }} style={styles.postTileImage} />
+          <Image
+            contentFit="cover"
+            source={{ uri: preview }}
+            style={styles.postTileImage}
+          />
         ) : (
           <View style={styles.postTilePlaceholder}>
             <Ionicons
@@ -1231,7 +1440,11 @@ function ProfilePostTile({
               <Text style={styles.postTileStatText}>{likeCount ?? 0}</Text>
             </View>
             <View style={styles.postTileStatItem}>
-              <Ionicons color={colors.muted} name="bookmark-outline" size={13} />
+              <Ionicons
+                color={colors.muted}
+                name="bookmark-outline"
+                size={13}
+              />
               <Text style={styles.postTileStatText}>{favoriteCount ?? 0}</Text>
             </View>
           </View>
@@ -1341,8 +1554,14 @@ function ProfileActivityRow({
   onDelete?: () => void;
   onPress: () => void;
 }) {
-  const title = activity.title || activity.first_video?.original_filename || "未命名 Activity";
-  const videoStatus = activity.video_count > 0 ? uploadStatusLabel(activity.upload_status) : "无视频";
+  const title =
+    activity.title ||
+    activity.first_video?.original_filename ||
+    "未命名 Activity";
+  const videoStatus =
+    activity.video_count > 0
+      ? uploadStatusLabel(activity.upload_status)
+      : "无视频";
   const metaParts = [
     contentDate(activity.started_at ?? activity.created_at),
     formatActivityLocation(activity.location) !== "未记录位置"
@@ -1357,10 +1576,18 @@ function ProfileActivityRow({
     activity.activity_type === "match" ? "trophy-outline" : "fitness-outline";
 
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.activityWindowRow}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.activityWindowRow}
+    >
       <View style={styles.activityThumb}>
         {thumbnail ? (
-          <Image contentFit="cover" source={{ uri: thumbnail }} style={styles.activityThumbImage} />
+          <Image
+            contentFit="cover"
+            source={{ uri: thumbnail }}
+            style={styles.activityThumbImage}
+          />
         ) : (
           <View style={styles.activityThumbFallback}>
             <Ionicons color={colors.inverse} name={fallbackIcon} size={19} />
@@ -1374,7 +1601,9 @@ function ProfileActivityRow({
       </View>
       <View style={styles.activityWindowText}>
         <Text style={styles.windowTitle}>{title}</Text>
-        <Text numberOfLines={2} style={styles.windowMeta}>{metaParts.join(" · ")}</Text>
+        <Text numberOfLines={2} style={styles.windowMeta}>
+          {metaParts.join(" · ")}
+        </Text>
       </View>
       <Pill>{activityTypeLabel(activity.activity_type)}</Pill>
       {onDelete ? (
@@ -1414,7 +1643,9 @@ function ProfileLessonRow({ lesson }: { lesson: ProfileLesson }) {
       <View style={[styles.rowAccent, styles.rowAccentSky]} />
       <View style={styles.activityWindowText}>
         <Text style={styles.windowTitle}>{title}</Text>
-        <Text numberOfLines={2} style={styles.windowMeta}>{subtitle}</Text>
+        <Text numberOfLines={2} style={styles.windowMeta}>
+          {subtitle}
+        </Text>
       </View>
       <Pill>{lesson.role === "coach" ? "教练" : "学员"}</Pill>
     </View>
@@ -1430,13 +1661,23 @@ function ContentLoading({ text = "正在加载我的内容" }: { text?: string }
   );
 }
 
-function ContentError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ContentError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
   return (
     <View style={styles.contentStatePanel}>
       <IconBadge name="alert-circle-outline" tone="clay" />
       <Text style={styles.contentStateTitle}>加载失败</Text>
       <Text style={styles.contentStateText}>{message}</Text>
-      <Pressable accessibilityRole="button" onPress={onRetry} style={styles.retryButton}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onRetry}
+        style={styles.retryButton}
+      >
         <Text style={styles.retryButtonText}>重试</Text>
       </Pressable>
     </View>
@@ -1471,8 +1712,12 @@ function CoachWorkspace({
   const router = useRouter();
   const fullCoach = coachIdentity?.status === "certified_coach";
   const identityLabel = coachIdentity?.label ?? "教练";
-  const canManageCourses = Boolean(coachIdentity?.capabilities.course_management);
-  const canManageStudents = Boolean(coachIdentity?.capabilities.student_management);
+  const canManageCourses = Boolean(
+    coachIdentity?.capabilities.course_management,
+  );
+  const canManageStudents = Boolean(
+    coachIdentity?.capabilities.student_management,
+  );
 
   return (
     <View style={styles.profileBody}>
@@ -1480,7 +1725,9 @@ function CoachWorkspace({
         <View>
           <Text style={styles.profileHandle}>{identityLabel}工作台</Text>
           <Text style={styles.coachTopHint}>
-            {fullCoach ? "今天有 2 节课，2 条视频待点评" : "基础教学服务、视频点评和学员咨询"}
+            {fullCoach
+              ? "今天有 2 节课，2 条视频待点评"
+              : "基础教学服务、视频点评和学员咨询"}
           </Text>
         </View>
         <Pressable
@@ -1489,7 +1736,11 @@ function CoachWorkspace({
           onPress={onSwitchToPlayer}
           style={styles.modeButton}
         >
-          <Ionicons color={colors.accentDeep} name="tennisball-outline" size={16} />
+          <Ionicons
+            color={colors.accentDeep}
+            name="tennisball-outline"
+            size={16}
+          />
           <Text style={styles.modeButtonText}>球员模式</Text>
         </Pressable>
       </View>
@@ -1499,14 +1750,24 @@ function CoachWorkspace({
           <View>
             <Text style={styles.coachTitle}>教学概览</Text>
             <Text style={styles.coachSubtitle}>
-              {fullCoach ? "学员跟进、课程记录和视频点评集中处理" : "陪练、基础教学服务和视频点评集中处理"}
+              {fullCoach
+                ? "学员跟进、课程记录和视频点评集中处理"
+                : "陪练、基础教学服务和视频点评集中处理"}
             </Text>
           </View>
           <IconBadge name="school-outline" tone="sky" />
         </View>
         <View style={styles.coachStats}>
-          <ProfileStat inverse label={fullCoach ? "学员" : "服务"} value={fullCoach ? "28" : "3"} />
-          <ProfileStat inverse label={fullCoach ? "本周课" : "咨询"} value={fullCoach ? "11" : "6"} />
+          <ProfileStat
+            inverse
+            label={fullCoach ? "学员" : "服务"}
+            value={fullCoach ? "28" : "3"}
+          />
+          <ProfileStat
+            inverse
+            label={fullCoach ? "本周课" : "咨询"}
+            value={fullCoach ? "11" : "6"}
+          />
           <ProfileStat inverse label="待点评" value="2" />
         </View>
       </View>
@@ -1520,7 +1781,12 @@ function CoachWorkspace({
                 accessibilityLabel={`查看${student.name}档案`}
                 accessibilityRole="button"
                 key={student.id}
-                onPress={() => router.push({ pathname: "/student/[id]", params: { id: student.id } })}
+                onPress={() =>
+                  router.push({
+                    pathname: "/student/[id]",
+                    params: { id: student.id },
+                  })
+                }
                 style={styles.studentRow}
               >
                 <Avatar name={student.name} size={46} />
@@ -1533,7 +1799,11 @@ function CoachWorkspace({
                     {student.focus} · 最近上课 {student.lastLesson}
                   </Text>
                 </View>
-                <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+                <Ionicons
+                  color={colors.muted}
+                  name="chevron-forward"
+                  size={18}
+                />
               </Pressable>
             ))}
           </View>
@@ -1542,8 +1812,16 @@ function CoachWorkspace({
         <View style={styles.section}>
           <SectionHeader title="可用服务" />
           <View style={styles.compactList}>
-            <RowButton icon="tennisball-outline" subtitle="陪练、基础教学、技术展示" title="发布基础教学服务" />
-            <RowButton icon="chatbubble-ellipses-outline" subtitle="接收学员咨询和初步沟通" title="学员咨询" />
+            <RowButton
+              icon="tennisball-outline"
+              subtitle="陪练、基础教学、技术展示"
+              title="发布基础教学服务"
+            />
+            <RowButton
+              icon="chatbubble-ellipses-outline"
+              subtitle="接收学员咨询和初步沟通"
+              title="学员咨询"
+            />
           </View>
         </View>
       )}
@@ -1595,7 +1873,9 @@ function CoachWorkspace({
         <SectionHeader title="教学记录" />
         <Card style={styles.noteCard}>
           <Text style={styles.noteTitle}>本周重点</Text>
-          <Text style={styles.noteText}>发球组继续观察抛球高度，青少年组记录正手击球点变化。</Text>
+          <Text style={styles.noteText}>
+            发球组继续观察抛球高度，青少年组记录正手击球点变化。
+          </Text>
         </Card>
       </View>
     </View>
@@ -1747,6 +2027,23 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 24,
     fontWeight: "900",
+  },
+  coachIdentityEntry: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 5,
+    minHeight: 30,
+    paddingHorizontal: 10,
+  },
+  coachIdentityEntryText: {
+    color: colors.accentDeep,
+    fontSize: 12,
+    fontWeight: "800",
   },
   socialOverview: {
     backgroundColor: colors.surfaceWarm,
