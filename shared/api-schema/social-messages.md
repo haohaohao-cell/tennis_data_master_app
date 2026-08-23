@@ -88,10 +88,153 @@ GET /messages/requests
 POST /messages/requests/{message_request_id}/accept
 POST /messages/requests/{message_request_id}/decline
 GET /messages/conversations/{conversation_id}/messages
+POST /messages/conversations/{conversation_id}/messages/reconcile
 POST /messages/conversations/{conversation_id}/messages
 POST /messages/conversations/{conversation_id}/read
+POST /messages/conversations/{conversation_id}/pin
+DELETE /messages/conversations/{conversation_id}/pin
+POST /messages/conversations/{conversation_id}/mute
+DELETE /messages/conversations/{conversation_id}/mute
+POST /messages/conversations/{conversation_id}/hide
+DELETE /messages/conversations/{conversation_id}/hide
 GET /messages/unread-counts
 ```
+
+Conversation Pin is a per-user membership preference backed by
+`chat_conversation_members.pinned_at`. `POST .../pin` sets the authenticated
+active member's timestamp only when it is currently null; an idempotent retry
+preserves the existing timestamp. `DELETE .../pin` clears that member's
+timestamp and is also idempotent. Neither endpoint accepts another user or
+member identifier.
+
+Conversation lists are ordered before pagination with pinned memberships
+first. Both the pinned and unpinned buckets retain the existing ordering:
+conversations with activity before empty conversations, then
+`last_message_at DESC`, then `created_at DESC`. Pin does not change unread
+counts, read watermarks, block state, history, last-message metadata, Push, or
+the other participant's membership.
+
+Conversation Mute is a per-user membership preference backed by
+`chat_conversation_members.muted_until`. `POST .../mute` accepts no body and,
+when the caller is not effectively muted, sets `muted_until` to authoritative
+server UTC time plus 24 hours. An active retry preserves the original expiry;
+an expired timestamp is treated as unmuted and a new POST creates a fresh
+24-hour expiry. `DELETE .../mute` clears the timestamp and is idempotent.
+Conversation members include server-derived `is_muted`, which is true only
+when `muted_until` is later than server time; clients must use this boolean
+rather than their local clock. The response is:
+
+```json
+{
+  "success": true,
+  "conversation_id": "uuid",
+  "muted_until": "2026-08-16T00:00:00Z",
+  "is_muted": true
+}
+```
+
+Mute does not change send/receive, unread or badge counts, read watermarks,
+Pin, Block, history, or last-message metadata. It affects only future Direct
+Message Push intent eligibility for that membership. When global
+`direct_message_notifications` is disabled the intent decision is
+`suppressed_by_preference`; otherwise an effective mute returns
+`suppressed_by_conversation_mute`. Expired mutes do not suppress Push.
+
+Conversation Hide is a per-user visibility preference backed by
+`chat_conversation_members.archived_at`. `POST .../hide` stores an
+authoritative server UTC timestamp only when the caller is not already hidden;
+retries preserve the original timestamp. `DELETE .../hide` clears it and is
+idempotent. The response includes `archived_at` and server-derived
+`is_hidden`. Hide removes the membership from `GET /messages/conversations`
+before ordering and pagination, but does not delete history, mark messages
+read, alter unread/badge counters, Pin, Mute, Block, or Push preferences.
+
+A genuinely new ChatMessage clears `archived_at` for every active member in
+the same creation transaction, restoring normal list visibility while
+preserving Pin and Mute. An idempotent retry that returns an existing message,
+as well as history reads and mark-read, does not restore a hidden membership.
+Hide does not suppress Direct Message Push.
+
+**KNOWN UX LIMITATION — HIDDEN UNREAD DISCOVERABILITY:** hidden conversations
+continue to contribute unread and Messages badge counts. This avoids falsely
+marking messages read; a hidden-conversation management flow is deferred.
+
+`GET /messages/conversations/{conversation_id}/messages` is authorized for the
+current active member and returns `other_member_last_read_message_seq` for a
+Direct conversation. This is the other participant's server-side read
+high-watermark; it is `null` for Group conversations. Clients derive a sender
+receipt in memory with `message_seq <= other_member_last_read_message_seq`.
+The server fetches this watermark once per list request rather than storing a
+receipt row for every message.
+
+The same Direct message-list response includes an authoritative interaction
+state:
+
+```json
+{
+  "direct_interaction_state": {
+    "can_send": false,
+    "blocked_by_current_user": true
+  }
+}
+```
+
+`can_send` is false when an active `user_blocks` row exists in either
+direction. `blocked_by_current_user` is true only when the authenticated user
+owns an active block row, allowing the App to explain the user's own action
+without disclosing that the other participant blocked them. Both fields are
+recomputed once per message-list request. Group responses return
+`direct_interaction_state: null` and do not imply single-recipient block
+semantics. Block state does not revoke authenticated member access to history,
+mark-read, or existing read high-watermarks; message sending and Message
+Requests remain protected by the server's bidirectional block enforcement.
+
+`POST /messages/conversations/{conversation_id}/read` accepts an optional
+bounded body:
+
+```json
+{
+  "through_message_seq": 10
+}
+```
+
+When supplied, the server advances the authenticated member's
+`last_read_message_seq` only through that observed sequence, never regresses
+an existing watermark, and returns `last_read_message_seq` plus the remaining
+`unread_count`. Omitting the body preserves the legacy behavior of marking the
+conversation through its current server high-watermark. Clients should send
+the observed sequence to avoid marking messages that arrived after the read
+view was reconciled.
+
+Unread counts keep message, notification, and request semantics separate:
+
+```json
+{
+  "unread_direct_message_count": 2,
+  "unread_group_message_count": 1,
+  "unread_notification_count": 3,
+  "pending_message_request_count": 4,
+  "total_unread_count": 6,
+  "messages_tab_badge_count": 9
+}
+```
+
+Message list responses additionally include:
+
+```json
+{
+  "conversation_id": "conversation-id",
+  "direct_interaction_state": {
+    "can_send": true,
+    "blocked_by_current_user": false
+  },
+  "items": [],
+  "next_before_seq": null,
+  "other_member_last_read_message_seq": 10
+}
+```
+
+`pending_message_request_count` counts all pending incoming requests for the authenticated user and is not pagination-dependent. `unread_notification_count` continues to count every unread notification record, including the notification record created for a Message Request, and `total_unread_count` remains direct plus group plus that legacy notification count for compatibility. `messages_tab_badge_count` is the product-specific aggregate: direct unread plus ordinary notification unread plus pending incoming requests. It excludes group unread and Message-Request-derived notification records because requests are already represented by `pending_message_request_count`.
 
 Create message request:
 
@@ -134,9 +277,156 @@ The message table does not own business objects. It only references existing obj
 ## Notifications
 
 ```text
-GET  /notifications
+GET  /notifications?product_category=interaction_follow|course_system|request
 POST /notifications/{user_notification_id}/read
 POST /notifications/read-all
 ```
 
 First version supports follow, post like, post comment, and comment reply notifications. Message requests use the generic `custom` event type with a message request payload. The same schema can later carry mentions, AI analysis completion, lessons, coach events, and system announcements.
+
+Every returned event includes an additive normalized contract:
+
+```json
+{
+  "event_type": "custom",
+  "notification_type": "message_request",
+  "category": "interaction",
+  "product_category": "request",
+  "target": {
+    "type": "message_request",
+    "request_id": "uuid"
+  }
+}
+```
+
+Text messages may reply to an existing message in the same conversation:
+
+```json
+{
+  "message_type": "text",
+  "text_content": "Agreed",
+  "reply_to_message_id": "message-uuid",
+  "client_message_id": "device-generated-id"
+}
+```
+
+The server requires the target to exist, belong to the same conversation, be
+available, and be accessible to the authenticated conversation member. A
+cross-conversation target is rejected without exposing the target content.
+Message responses include an additive `reply_preview` when applicable:
+`state` is `available` or `unavailable`; available previews contain the target
+message ID/sequence, sender identity, and a bounded text preview. Unavailable
+previews contain only a neutral state and target ID. The preview is hydrated
+from the authorized conversation and does not require the original message to
+be in the current history page. Reply retries preserve the existing
+`client_message_id` and therefore return the originally committed reply
+relationship without incrementing unread twice.
+
+Direct text messages can be recalled by their original sender with:
+
+```text
+POST /messages/conversations/{conversation_id}/messages/{message_id}/recall
+```
+
+Recall has no time window in V1 and is idempotent. It changes the persisted
+message status from `sent` to `revoked` without deleting the row, changing its
+sequence, or changing unread/read watermarks. Only an active member who owns
+the text message can recall it; Group, media, system, non-member, and
+other-user messages are rejected. A revoked message remains in history as a
+neutral tombstone with content-bearing fields redacted. It is excluded from
+conversation history search. If it is the conversation's latest message,
+only `last_message_preview` changes to `[消息已撤回]`; the latest message ID,
+sequence, and timestamp remain unchanged. No notification or Push event is
+created. Existing Reply previews for a recalled original become
+`state = unavailable`.
+
+### Loaded-message reconciliation
+
+```text
+POST /messages/conversations/{conversation_id}/messages/reconcile
+```
+
+The request body is `{ "message_ids": ["..."] }` and accepts up to 500
+deduplicated persisted message IDs already loaded by the caller. The server
+returns `{ conversation_id, items }` using the same privacy-safe message
+serializer as history. Only rows belonging to the authorized conversation are
+returned; unknown or cross-conversation IDs are omitted and non-members are
+rejected. This endpoint has no read, unread, hide, pin, mute, notification, or
+Push side effects and refreshes loaded history rows outside the normal latest-page poll.
+
+`event_type` and `category` preserve stored values. `notification_type` normalizes Message Requests to `message_request`, including legacy `custom` rows linked by `message_request:<request_id>`. Product categories are:
+
+- `interaction_follow`: ordinary `interaction` notifications such as follow, post like, post comment, and comment reply.
+- `course_system`: ordinary `system`, `ai`, `coach`, and `lesson` notifications.
+- `request`: Message Request notifications, which remain separate from both normal Notification View categories.
+
+`product_category` filtering is applied by the server before pagination. Existing `category` filtering remains supported.
+
+`target` is the preferred navigation contract and is a discriminated union with these bounded types: `user_profile`, `post_detail`, `post_comments`, `message_request`, `chat`, `activity_detail`, `lesson_detail`, `coach_identity`, and `none`. Identifier-bearing targets use semantic fields such as `user_id`, `post_id`, `conversation_id`, `activity_id`, and `lesson_id`. `message_request.request_id` may be null when only the Request view is reliably known. `none` is returned for incomplete or unsupported events; clients must not fabricate identifiers or treat `deep_link` as an arbitrary executable route. Existing destination authorization remains authoritative.
+
+Current derivation maps follow, post-like, post-comment/reply, linked Message Requests, Activity-backed AI completion, and coach-review events. The App opens the existing comments focus for `post_comments`. Lesson targets remain non-actionable until a Lesson detail route exists. `chat` is reserved for future notification producers; this contract does not create Direct Message notification events.
+
+### Notification preferences
+
+```text
+GET   /notifications/preferences
+PATCH /notifications/preferences
+```
+
+Both routes are authenticated self-service APIs and never accept another user's ID. GET always returns all six effective boolean values:
+
+```json
+{
+  "direct_message_notifications": true,
+  "message_request_notifications": true,
+  "like_comment_notifications": true,
+  "follow_notifications": true,
+  "course_notifications": true,
+  "ai_analysis_notifications": true
+}
+```
+
+All fields default to `true`, including for users without a persisted preference row. GET does not materialize that default row. PATCH accepts one or more of the same strict boolean fields, updates only supplied fields, persists the result, and returns the full effective object. Empty bodies, null/string values, and unknown fields are rejected.
+
+These settings control only future system Push eligibility. They do not create, delete, hide, read, or suppress Notification Center records; do not change unread or badge calculations; and do not permit or block Direct Messages or Message Requests.
+
+Stable preference kinds are `direct_message`, `message_request`, `like_comment`, `follow`, `course`, and `ai_analysis`. Normalized event mappings are: `follow` to `follow`; `post_like`, `post_comment`, and `comment_reply` to `like_comment`; `message_request` to `message_request`; `lesson_created` and `lesson_updated` to `course`; and `ai_analysis_completed` to `ai_analysis`. Direct Message Push will request `direct_message` explicitly because Direct Messages do not create notification events. Unmapped types currently receive no preference-based suppression until product policy defines a mapping.
+
+### Messaging Push delivery contract
+
+Messaging can derive a provider-independent Push intent after a Direct Message, Message Request, or Notification Event has been persisted. Intent construction is read-only and does not transmit Push, enqueue work, register devices, or create additional Notification Center events.
+
+Push kinds are bounded to `direct_message`, `message_request`, and `notification_event`. Delivery decisions are:
+
+- `eligible`: semantic request and mapped preference allow delivery.
+- `suppressed_by_preference`: the user disabled the mapped preference.
+- `suppressed_by_conversation_mute`: the recipient actively muted that Direct
+  Message conversation after the global preference allowed delivery.
+- `eligible_without_preference_mapping`: product has not mapped this semantic to a preference, so no preference-based suppression is applied.
+- `invalid_target`: a mapped actionable event lacks its required typed target.
+- `unsupported`: the persisted object cannot produce a supported intent, or its destination is not currently actionable.
+
+The intent wrapper contains `decision` and an optional semantic `request`. A request uses this common provider-agnostic shape:
+
+```json
+{
+  "push_kind": "notification_event",
+  "recipient_user_id": "user-id",
+  "delivery_id": "notification_event:event-id",
+  "preference_kind": "follow",
+  "notification_type": "follow",
+  "target": { "type": "user_profile", "user_id": "actor-id" },
+  "display": { "title": "display title", "body": "display body" },
+  "data": {
+    "type": "notification_event",
+    "notification_event_id": "event-id",
+    "actor_user_id": "actor-id"
+  }
+}
+```
+
+The `data` member is itself a bounded union. Direct Message data contains only `message_id` and `sender_user_id`; Message Request data contains only `request_id` and `requester_user_id`; Notification Event data contains `notification_event_id` and optional `actor_user_id`. Routing always uses the existing typed `target` contract. No phone, email, message history, attachment data, private Activity/analysis payload, arbitrary route, provider token, or provider-specific option is included.
+
+Logical delivery identities reuse persisted IDs: `direct_message:<message_id>`, `message_request:<request_id>`, and `notification_event:<notification_event_id>`. A Notification Event normalized as a Message Request delegates to the Message Request contract, preserving the same request delivery identity. Future deduplication scopes `delivery_id` together with `recipient_user_id`; these identities enable that integration but do not implement provider-level dedup storage or retries.
+
+Direct Message and Message Request display bodies intentionally omit their private text. Display metadata and routing data remain separate so shared infrastructure can later apply the confirmed lock-screen preview policy. Lesson events carry their mapped `course` preference but currently resolve to `unsupported` when enabled because the App has no actionable Lesson detail route. Unmapped `mention`, `video_shared`, `coach_application_reviewed`, `system_announcement`, and `custom` events use `eligible_without_preference_mapping` without changing their in-app records.

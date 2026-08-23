@@ -84,6 +84,10 @@ export type ProfileContent = {
     matches: number;
     training: number;
     courses: number;
+    received_like_count: number;
+    friend_count: number;
+    following_count: number;
+    follower_count: number;
   };
   posts: ProfilePost[];
   matches: ProfileActivity[];

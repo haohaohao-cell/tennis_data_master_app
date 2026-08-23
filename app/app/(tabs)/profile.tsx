@@ -2,15 +2,31 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 import { getCoachIdentity, type CoachIdentity } from "@/api/coach";
 import { ApiError } from "@/api/client";
 import { formatActivityLocation } from "@/api/location";
 import { resolveMediaUrl } from "@/api/activityDetail";
-import { primePostDetailPreview } from "@/api/postDetailPreviewCache";
+import { deleteActivity } from "@/api/uploads";
 import {
+  clearPostDetailPreview,
+  primePostDetailPreview,
+} from "@/api/postDetailPreviewCache";
+import {
+  deletePost,
   getMyPostCollection,
   unfavoritePost,
   unlikePost,
@@ -39,7 +55,19 @@ import { coachCourses, pendingVideos, students } from "@/data/mockData";
 import { colors, radius } from "@/theme";
 
 type ProfileMode = "player" | "coach";
-type PlayerTab = "posts" | "matches" | "training" | "courses" | "saved" | "liked" | "data";
+type PlayerTab =
+  | "posts"
+  | "matches"
+  | "training"
+  | "courses"
+  | "saved"
+  | "liked"
+  | "data";
+type PostVisibilityFilter = "all" | "public" | "private";
+type PopoverAnchor = {
+  right: number;
+  top: number;
+};
 type PostCollectionState = {
   error: string | null;
   hasMore: boolean;
@@ -82,11 +110,17 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { accessToken, isAuthenticated, status } = useAuth();
   const [mode, setMode] = useState<ProfileMode>("player");
-  const [coachIdentity, setCoachIdentity] = useState<CoachIdentity | null>(null);
+  const [coachIdentity, setCoachIdentity] = useState<CoachIdentity | null>(
+    null,
+  );
   const [coachLoading, setCoachLoading] = useState(false);
-  const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
+  const [profileContent, setProfileContent] = useState<ProfileContent | null>(
+    null,
+  );
   const [profileContentLoading, setProfileContentLoading] = useState(false);
-  const [profileContentError, setProfileContentError] = useState<string | null>(null);
+  const [profileContentError, setProfileContentError] = useState<string | null>(
+    null,
+  );
 
   const loadCoachIdentity = useCallback(async () => {
     if (!accessToken) {
@@ -164,9 +198,13 @@ export default function ProfileScreen() {
             router.push("/profile/coach-apply");
           }}
           onRetryContent={loadProfileContent}
+          onRefreshContent={loadProfileContent}
         />
       ) : (
-        <CoachWorkspace coachIdentity={coachIdentity} onSwitchToPlayer={() => setMode("player")} />
+        <CoachWorkspace
+          coachIdentity={coachIdentity}
+          onSwitchToPlayer={() => setMode("player")}
+        />
       )}
     </ScrollPage>
   );
@@ -227,6 +265,7 @@ function PlayerProfile({
   content,
   contentError,
   contentLoading,
+  onRefreshContent,
   onSwitchToCoach,
   onRetryContent,
 }: {
@@ -235,6 +274,7 @@ function PlayerProfile({
   content: ProfileContent | null;
   contentError: string | null;
   contentLoading: boolean;
+  onRefreshContent: () => Promise<void>;
   onSwitchToCoach: () => void;
   onRetryContent: () => void;
 }) {
@@ -243,13 +283,32 @@ function PlayerProfile({
   const [menuOpen, setMenuOpen] = useState(false);
   const { user } = useAuth();
   const profileCompleted = Boolean(user?.profile_completed);
-  const displayName = profileCompleted ? (user?.nickname ?? "网球用户") : "网球用户";
+  const displayName = profileCompleted
+    ? (user?.nickname ?? "网球用户")
+    : "网球用户";
+
+  const openSocialList = useCallback(
+    (kind: "friends" | "following" | "followers") => {
+      if (!user?.user_id) {
+        return;
+      }
+      router.push({
+        pathname: "/friends/list",
+        params: { type: kind },
+      });
+    },
+    [router, user?.user_id],
+  );
 
   return (
     <View style={styles.profileBody}>
       <View style={styles.playerHeaderRow}>
         <View style={styles.playerHero}>
-          <Avatar name={displayName} size={72} uri={resolveMediaUrl(user?.avatar_path)} />
+          <Avatar
+            name={displayName}
+            size={72}
+            uri={resolveMediaUrl(user?.avatar_path)}
+          />
           <View style={styles.playerInfo}>
             <View style={styles.nameLine}>
               <Text style={styles.playerName}>{displayName}</Text>
@@ -261,6 +320,24 @@ function PlayerProfile({
                 <Pill>{profileCompleted ? "资料已完善" : "资料待完善"}</Pill>
               </Pressable>
             </View>
+            <Pressable
+              accessibilityLabel="教练身份转换"
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({
+                  pathname: "/create-placeholder",
+                  params: { type: "教练身份转换" },
+                })
+              }
+              style={styles.coachIdentityEntry}
+            >
+              <Ionicons
+                color={colors.accentDeep}
+                name="swap-horizontal-outline"
+                size={15}
+              />
+              <Text style={styles.coachIdentityEntryText}>教练身份转换</Text>
+            </Pressable>
           </View>
         </View>
         <View style={styles.headerActions}>
@@ -274,7 +351,11 @@ function PlayerProfile({
               {coachLoading ? (
                 <ActivityIndicator color={colors.accentDeep} size="small" />
               ) : (
-                <Ionicons color={colors.accentDeep} name="school-outline" size={16} />
+                <Ionicons
+                  color={colors.accentDeep}
+                  name="school-outline"
+                  size={16}
+                />
               )}
               <Text style={styles.modeButtonText}>教练入口</Text>
             </Pressable>
@@ -290,7 +371,99 @@ function PlayerProfile({
         </View>
       </View>
 
-      <View style={styles.socialStats}>
+      <View style={styles.socialOverview}>
+        <View style={styles.socialMetricGrid}>
+          <Pressable
+            accessibilityLabel="查看获赞总数"
+            accessibilityRole="button"
+            onPress={() =>
+              Alert.alert(
+                "获赞",
+                `共获得 ${content?.stats.received_like_count ?? 0} 个赞`,
+              )
+            }
+            style={styles.socialMetric}
+          >
+            <View
+              style={[styles.socialMetricIcon, styles.socialMetricIconLikes]}
+            >
+              <Ionicons color={colors.clay} name="heart-outline" size={16} />
+            </View>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.received_like_count ?? 0}
+            </Text>
+            <Text style={styles.socialMetricLabel}>获赞</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="查看互关列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("friends")}
+            style={styles.socialMetric}
+          >
+            <View
+              style={[styles.socialMetricIcon, styles.socialMetricIconFriends]}
+            >
+              <Ionicons
+                color={colors.accentDeep}
+                name="people-outline"
+                size={16}
+              />
+            </View>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.friend_count ?? 0}
+            </Text>
+            <Text style={styles.socialMetricLabel}>互关</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="查看关注列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("following")}
+            style={styles.socialMetric}
+          >
+            <View
+              style={[
+                styles.socialMetricIcon,
+                styles.socialMetricIconFollowing,
+              ]}
+            >
+              <Ionicons
+                color={colors.gold}
+                name="add-circle-outline"
+                size={16}
+              />
+            </View>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.following_count ?? 0}
+            </Text>
+            <Text style={styles.socialMetricLabel}>关注</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="查看粉丝列表"
+            accessibilityRole="button"
+            onPress={() => openSocialList("followers")}
+            style={styles.socialMetric}
+          >
+            <View
+              style={[
+                styles.socialMetricIcon,
+                styles.socialMetricIconFollowers,
+              ]}
+            >
+              <Ionicons
+                color={colors.sky}
+                name="person-add-outline"
+                size={16}
+              />
+            </View>
+            <Text style={styles.socialMetricValue}>
+              {content?.stats.follower_count ?? 0}
+            </Text>
+            <Text style={styles.socialMetricLabel}>粉丝</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.contentStats}>
         <ProfileStat label="动态" value={`${content?.stats.posts ?? 0}`} />
         <ProfileStat label="比赛" value={`${content?.stats.matches ?? 0}`} />
         <ProfileStat label="训练" value={`${content?.stats.training ?? 0}`} />
@@ -317,7 +490,12 @@ function PlayerProfile({
                 name={tab.icon as IconName}
                 size={17}
               />
-              <Text style={[styles.playerTabText, selected && styles.playerTabTextActive]}>
+              <Text
+                style={[
+                  styles.playerTabText,
+                  selected && styles.playerTabTextActive,
+                ]}
+              >
                 {tab.label}
               </Text>
             </Pressable>
@@ -330,6 +508,7 @@ function PlayerProfile({
         error={contentError}
         loading={contentLoading}
         onRetry={onRetryContent}
+        onRefreshContent={onRefreshContent}
         tab={activeTab}
       />
 
@@ -344,14 +523,21 @@ function PlayerProfile({
 }
 
 function isActiveCoachIdentity(identity: CoachIdentity | null) {
-  return identity?.status === "certified_coach" || identity?.status === "non_professional_coach";
+  return (
+    identity?.status === "certified_coach" ||
+    identity?.status === "non_professional_coach"
+  );
 }
 
 function coachMenuSubtitle(identity: CoachIdentity | null, loading: boolean) {
   if (loading) {
     return "正在同步";
   }
-  if (!identity || identity.status === "normal_user" || identity.status === "coach_revoked") {
+  if (
+    !identity ||
+    identity.status === "normal_user" ||
+    identity.status === "coach_revoked"
+  ) {
     return "申请入口";
   }
   if (identity.status === "pending_review") {
@@ -378,16 +564,59 @@ function ProfileMenuDrawer({
   visible: boolean;
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const translateX = useRef(new Animated.Value(width)).current;
+  const [mounted, setMounted] = useState(visible);
 
-  function open(pathname: "/profile/edit" | "/profile/settings" | "/profile/coach-apply") {
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateX.setValue(width);
+      const animation = Animated.timing(translateX, {
+        duration: 240,
+        toValue: 0,
+        useNativeDriver: true,
+      });
+      animation.start();
+      return animation.stop;
+    }
+
+    const animation = Animated.timing(translateX, {
+      duration: 200,
+      toValue: width,
+      useNativeDriver: true,
+    });
+    animation.start(({ finished }) => {
+      if (finished) {
+        setMounted(false);
+      }
+    });
+    return animation.stop;
+  }, [translateX, visible, width]);
+
+  function open(
+    pathname: "/profile/edit" | "/profile/settings" | "/profile/coach-apply",
+  ) {
     onClose();
     router.push(pathname);
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <Pressable accessibilityRole="button" onPress={onClose} style={styles.drawerBackdrop}>
-        <View onStartShouldSetResponder={() => true} style={styles.sideDrawer}>
+    <Modal
+      animationType="none"
+      onRequestClose={onClose}
+      transparent
+      visible={mounted}
+    >
+      <Pressable
+        accessibilityRole="button"
+        onPress={onClose}
+        style={styles.drawerBackdrop}
+      >
+        <Animated.View
+          onStartShouldSetResponder={() => true}
+          style={[styles.sideDrawer, { transform: [{ translateX }] }]}
+        >
           <View style={styles.drawerHeader}>
             <View>
               <Text style={styles.drawerKicker}>我的功能</Text>
@@ -423,7 +652,7 @@ function ProfileMenuDrawer({
               title="设置"
             />
           </View>
-        </View>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
@@ -440,10 +669,20 @@ function ProfileStat({
 }) {
   return (
     <View style={styles.profileStat}>
-      <Text style={[styles.profileStatValue, inverse && styles.profileStatValueInverse]}>
+      <Text
+        style={[
+          styles.profileStatValue,
+          inverse && styles.profileStatValueInverse,
+        ]}
+      >
         {value}
       </Text>
-      <Text style={[styles.profileStatLabel, inverse && styles.profileStatLabelInverse]}>
+      <Text
+        style={[
+          styles.profileStatLabel,
+          inverse && styles.profileStatLabelInverse,
+        ]}
+      >
         {label}
       </Text>
     </View>
@@ -454,17 +693,29 @@ function PlayerTabContent({
   content,
   error,
   loading,
+  onRefreshContent,
   onRetry,
   tab,
 }: {
   content: ProfileContent | null;
   error: string | null;
   loading: boolean;
+  onRefreshContent: () => Promise<void>;
   onRetry: () => void;
   tab: PlayerTab;
 }) {
   const router = useRouter();
   const { accessToken } = useAuth();
+  const [deletingContentId, setDeletingContentId] = useState<string | null>(
+    null,
+  );
+  const [postVisibilityFilter, setPostVisibilityFilter] =
+    useState<PostVisibilityFilter>("all");
+  const [postFilterOpen, setPostFilterOpen] = useState(false);
+  const [postFilterAnchor, setPostFilterAnchor] =
+    useState<PopoverAnchor | null>(null);
+  const postFilterButtonRef = useRef<View>(null);
+  const { width: windowWidth } = useWindowDimensions();
   const [collectionStates, setCollectionStates] = useState<
     Record<PostCollectionKind, PostCollectionState>
   >(() => ({
@@ -496,7 +747,10 @@ function PlayerTabContent({
         return;
       }
       const current = collectionStatesRef.current[collection];
-      if (current.loading || (append && (!current.hasMore || !current.nextCursor))) {
+      if (
+        current.loading ||
+        (append && (!current.hasMore || !current.nextCursor))
+      ) {
         return;
       }
 
@@ -564,7 +818,9 @@ function PlayerTabContent({
         }
         updateCollectionState(collection, (previous) => ({
           ...previous,
-          items: previous.items.filter((item) => item.post.social_post_id !== socialPostId),
+          items: previous.items.filter(
+            (item) => item.post.social_post_id !== socialPostId,
+          ),
         }));
       } catch (error) {
         updateCollectionState(collection, (previous) => ({
@@ -577,6 +833,77 @@ function PlayerTabContent({
     [accessToken, updateCollectionState],
   );
 
+  const openPostFilter = useCallback(() => {
+    postFilterButtonRef.current?.measureInWindow((x, y, width, height) => {
+      setPostFilterAnchor({
+        right: Math.max(12, windowWidth - x - width),
+        top: y + height + 8,
+      });
+      setPostFilterOpen(true);
+    });
+  }, [windowWidth]);
+
+  const selectPostVisibilityFilter = useCallback(
+    (filter: PostVisibilityFilter) => {
+      setPostVisibilityFilter(filter);
+      setPostFilterOpen(false);
+    },
+    [],
+  );
+
+  const deleteOwnedPost = useCallback(
+    (socialPostId: string) => {
+      if (!accessToken || deletingContentId) {
+        return;
+      }
+      Alert.alert("删除动态", "删除后将无法恢复，确定要删除吗？", [
+        { style: "cancel", text: "取消" },
+        {
+          style: "destructive",
+          text: "删除",
+          onPress: () => {
+            setDeletingContentId(socialPostId);
+            void deletePost(accessToken, socialPostId)
+              .then(async () => {
+                clearPostDetailPreview(socialPostId);
+                await onRefreshContent();
+              })
+              .catch((error) =>
+                Alert.alert("删除失败", profileContentErrorMessage(error)),
+              )
+              .finally(() => setDeletingContentId(null));
+          },
+        },
+      ]);
+    },
+    [accessToken, deletingContentId, onRefreshContent],
+  );
+
+  const deleteOwnedActivity = useCallback(
+    (tennisActivityId: string) => {
+      if (!accessToken || deletingContentId) {
+        return;
+      }
+      Alert.alert("删除日记", "删除后将无法恢复，确定要删除吗？", [
+        { style: "cancel", text: "取消" },
+        {
+          style: "destructive",
+          text: "删除",
+          onPress: () => {
+            setDeletingContentId(tennisActivityId);
+            void deleteActivity(accessToken, tennisActivityId)
+              .then(() => onRefreshContent())
+              .catch((error) =>
+                Alert.alert("删除失败", profileContentErrorMessage(error)),
+              )
+              .finally(() => setDeletingContentId(null));
+          },
+        },
+      ]);
+    },
+    [accessToken, deletingContentId, onRefreshContent],
+  );
+
   if (tab === "posts") {
     if (loading && !content) {
       return <ContentLoading />;
@@ -584,21 +911,84 @@ function PlayerTabContent({
     if (error && !content) {
       return <ContentError message={error} onRetry={onRetry} />;
     }
-    if (!content?.posts.length) {
-      return (
-        <ContentEmpty
-          icon="images-outline"
-          subtitle="发布到动态的内容会显示在这里"
-          title="还没有动态"
-        />
-      );
-    }
+
+    const posts = content?.posts ?? [];
+    const filteredPosts =
+      postVisibilityFilter === "all"
+        ? posts
+        : posts.filter((post) => post.visibility === postVisibilityFilter);
 
     return (
-      <View style={styles.contentGrid}>
-        {content.posts.map((post) => (
-          <ProfilePostTile key={post.social_post_id} post={post} />
-        ))}
+      <View style={styles.postContent}>
+        <View style={styles.postContentHeader}>
+          <Text style={styles.postContentTitle}>动态</Text>
+          <View ref={postFilterButtonRef} collapsable={false}>
+            <Pressable
+              accessibilityHint="选择动态可见范围"
+              accessibilityLabel={
+                postVisibilityFilter === "all"
+                  ? "筛选动态"
+                  : `筛选动态，当前为${postVisibilityFilter === "public" ? "公开" : "私密"}`
+              }
+              accessibilityRole="button"
+              accessibilityState={{ expanded: postFilterOpen }}
+              onPress={openPostFilter}
+              style={[
+                styles.postFilterButton,
+                postVisibilityFilter !== "all" && styles.postFilterButtonActive,
+              ]}
+            >
+              <Ionicons
+                color={
+                  postVisibilityFilter === "all"
+                    ? colors.ink
+                    : colors.accentDeep
+                }
+                name={
+                  postVisibilityFilter === "all" ? "funnel-outline" : "funnel"
+                }
+                size={18}
+              />
+              {postVisibilityFilter !== "all" ? (
+                <View style={styles.postFilterIndicator} />
+              ) : null}
+            </Pressable>
+          </View>
+        </View>
+
+        {posts.length === 0 ? (
+          <ContentEmpty
+            icon="images-outline"
+            subtitle="发布到动态的内容会显示在这里"
+            title="还没有动态"
+          />
+        ) : filteredPosts.length === 0 ? (
+          <ContentEmpty
+            icon="funnel-outline"
+            subtitle="尝试切换其它可见范围"
+            title="没有符合条件的动态"
+          />
+        ) : (
+          <View style={styles.contentGrid}>
+            {filteredPosts.map((post) => (
+              <ProfilePostTile
+                actionLabel="删除动态"
+                actionLoading={deletingContentId === post.social_post_id}
+                key={post.social_post_id}
+                onAction={() => deleteOwnedPost(post.social_post_id)}
+                post={post}
+              />
+            ))}
+          </View>
+        )}
+
+        <PostVisibilityFilterPopover
+          anchor={postFilterAnchor}
+          onClose={() => setPostFilterOpen(false)}
+          onSelect={selectPostVisibilityFilter}
+          selected={postVisibilityFilter}
+          visible={postFilterOpen}
+        />
       </View>
     );
   }
@@ -611,12 +1001,17 @@ function PlayerTabContent({
       return <ContentError message={error} onRetry={onRetry} />;
     }
 
-    const activities = tab === "matches" ? content?.matches ?? [] : content?.training ?? [];
+    const activities =
+      tab === "matches" ? (content?.matches ?? []) : (content?.training ?? []);
     if (!activities.length) {
       return (
         <ContentEmpty
           icon={tab === "matches" ? "trophy-outline" : "fitness-outline"}
-          subtitle={tab === "matches" ? "记录或上传比赛后会显示在这里" : "刚上传的视频 activity 会显示在这里"}
+          subtitle={
+            tab === "matches"
+              ? "记录或上传比赛后会显示在这里"
+              : "刚上传的视频 activity 会显示在这里"
+          }
           title={tab === "matches" ? "还没有比赛" : "还没有训练视频"}
         />
       );
@@ -628,6 +1023,8 @@ function PlayerTabContent({
           <ProfileActivityRow
             activity={activity}
             key={activity.tennis_activity_id}
+            onDelete={() => deleteOwnedActivity(activity.tennis_activity_id)}
+            deleting={deletingContentId === activity.tennis_activity_id}
             onPress={() =>
               router.push({
                 pathname: "/activity/[id]",
@@ -660,7 +1057,10 @@ function PlayerTabContent({
     return (
       <View style={styles.windowList}>
         {content.courses.map((lesson) => (
-          <ProfileLessonRow key={`${lesson.role}-${lesson.lesson_id}`} lesson={lesson} />
+          <ProfileLessonRow
+            key={`${lesson.role}-${lesson.lesson_id}`}
+            lesson={lesson}
+          />
         ))}
       </View>
     );
@@ -674,7 +1074,9 @@ function PlayerTabContent({
         emptyTitle="还没有收藏"
         onLoadMore={() => loadCollection("favorites", true)}
         onRefresh={() => loadCollection("favorites")}
-        onRemove={(socialPostId) => removeCollectionPost("favorites", socialPostId)}
+        onRemove={(socialPostId) =>
+          removeCollectionPost("favorites", socialPostId)
+        }
         removeLabel="取消收藏"
         state={collectionStates.favorites}
       />
@@ -706,7 +1108,9 @@ function PlayerTabContent({
         <View style={styles.dataBars}>
           {[74, 62, 86, 68].map((value, index) => (
             <View key={index} style={styles.dataBarRow}>
-              <Text style={styles.dataLabel}>{["发球", "接发", "底线", "移动"][index]}</Text>
+              <Text style={styles.dataLabel}>
+                {["发球", "接发", "底线", "移动"][index]}
+              </Text>
               <View style={styles.dataTrack}>
                 <View style={[styles.dataBar, { width: `${value}%` }]} />
               </View>
@@ -719,6 +1123,87 @@ function PlayerTabContent({
   }
 
   return null;
+}
+
+function PostVisibilityFilterPopover({
+  anchor,
+  onClose,
+  onSelect,
+  selected,
+  visible,
+}: {
+  anchor: PopoverAnchor | null;
+  onClose: () => void;
+  onSelect: (filter: PostVisibilityFilter) => void;
+  selected: PostVisibilityFilter;
+  visible: boolean;
+}) {
+  const options: { label: string; value: PostVisibilityFilter }[] = [
+    { label: "全部", value: "all" },
+    { label: "公开", value: "public" },
+    { label: "私密", value: "private" },
+  ];
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={visible}
+    >
+      <View style={styles.postFilterBackdrop}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.postFilterPopover,
+            {
+              right: anchor?.right ?? 12,
+              top: anchor?.top ?? 64,
+            },
+          ]}
+        >
+          <Text style={styles.postFilterTitle}>动态状态</Text>
+          {options.map((option) => {
+            const isSelected = selected === option.value;
+            return (
+              <Pressable
+                accessibilityLabel={`${option.label}动态`}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                key={option.value}
+                onPress={() => onSelect(option.value)}
+                style={[
+                  styles.postFilterOption,
+                  isSelected && styles.postFilterOptionActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.postFilterOptionText,
+                    isSelected && styles.postFilterOptionTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+                {isSelected ? (
+                  <Ionicons
+                    color={colors.accentDeep}
+                    name="checkmark"
+                    size={18}
+                  />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 function PostCollectionGrid({
@@ -747,7 +1232,13 @@ function PostCollectionGrid({
     return <ContentError message={state.error} onRetry={onRefresh} />;
   }
   if (state.items.length === 0) {
-    return <ContentEmpty icon={emptyIcon} subtitle={emptySubtitle} title={emptyTitle} />;
+    return (
+      <ContentEmpty
+        icon={emptyIcon}
+        subtitle={emptySubtitle}
+        title={emptyTitle}
+      />
+    );
   }
 
   return (
@@ -765,7 +1256,11 @@ function PostCollectionGrid({
       {state.error ? (
         <View style={styles.collectionErrorPanel}>
           <Text style={styles.collectionErrorText}>{state.error}</Text>
-          <Pressable accessibilityRole="button" onPress={() => void onRefresh()} style={styles.retryButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void onRefresh()}
+            style={styles.retryButton}
+          >
             <Text style={styles.retryButtonText}>重试</Text>
           </Pressable>
         </View>
@@ -777,7 +1272,10 @@ function PostCollectionGrid({
           onPress={() => {
             void onLoadMore();
           }}
-          style={[styles.loadMoreButton, state.loading && styles.loadMoreButtonDisabled]}
+          style={[
+            styles.loadMoreButton,
+            state.loading && styles.loadMoreButtonDisabled,
+          ]}
         >
           {state.loading ? (
             <ActivityIndicator color={colors.ink} size="small" />
@@ -831,7 +1329,8 @@ function CollectionPostTile({
 function postDetailToProfilePost(detail: PostDetailResponse): ProfilePost {
   const firstMedia = detail.media[0] ?? null;
   const firstVideo = firstMedia?.video_id
-    ? detail.videos.find((video) => video.video_id === firstMedia.video_id) ?? null
+    ? (detail.videos.find((video) => video.video_id === firstMedia.video_id) ??
+      null)
     : null;
   return {
     content: detail.post.content,
@@ -873,10 +1372,15 @@ function ProfilePostTile({
   previewDetail?: PostDetailResponse;
 }) {
   const router = useRouter();
-  const preview = resolveMediaUrl(post.first_image_path ?? post.first_video_thumbnail_path);
+  const preview = resolveMediaUrl(
+    post.first_image_path ?? post.first_video_thumbnail_path,
+  );
   const authorAvatarUri = resolveMediaUrl(authorAvatarPath);
-  const hasCollectionMeta = Boolean(authorName || likeCount !== undefined || favoriteCount !== undefined);
-  const isVideo = post.first_media_type === "video" || post.first_media_type === "video_clip";
+  const hasCollectionMeta = Boolean(
+    authorName || likeCount !== undefined || favoriteCount !== undefined,
+  );
+  const isVideo =
+    post.first_media_type === "video" || post.first_media_type === "video_clip";
 
   return (
     <Pressable
@@ -894,7 +1398,11 @@ function ProfilePostTile({
     >
       <View style={styles.postTilePreview}>
         {preview ? (
-          <Image contentFit="cover" source={{ uri: preview }} style={styles.postTileImage} />
+          <Image
+            contentFit="cover"
+            source={{ uri: preview }}
+            style={styles.postTileImage}
+          />
         ) : (
           <View style={styles.postTilePlaceholder}>
             <Ionicons
@@ -932,7 +1440,11 @@ function ProfilePostTile({
               <Text style={styles.postTileStatText}>{likeCount ?? 0}</Text>
             </View>
             <View style={styles.postTileStatItem}>
-              <Ionicons color={colors.muted} name="bookmark-outline" size={13} />
+              <Ionicons
+                color={colors.muted}
+                name="bookmark-outline"
+                size={13}
+              />
               <Text style={styles.postTileStatText}>{favoriteCount ?? 0}</Text>
             </View>
           </View>
@@ -958,7 +1470,13 @@ function ProfilePostTile({
           ) : (
             <Ionicons
               color={colors.ink}
-              name={actionLabel === "取消收藏" ? "bookmark" : "heart"}
+              name={
+                actionLabel === "取消收藏"
+                  ? "bookmark"
+                  : actionLabel === "取消点赞"
+                    ? "heart"
+                    : "trash-outline"
+              }
               size={17}
             />
           )}
@@ -1027,13 +1545,23 @@ function analysisStatusLabel(value: ProfileActivity["analysis_status"]) {
 
 function ProfileActivityRow({
   activity,
+  deleting = false,
+  onDelete,
   onPress,
 }: {
   activity: ProfileActivity;
+  deleting?: boolean;
+  onDelete?: () => void;
   onPress: () => void;
 }) {
-  const title = activity.title || activity.first_video?.original_filename || "未命名 Activity";
-  const videoStatus = activity.video_count > 0 ? uploadStatusLabel(activity.upload_status) : "无视频";
+  const title =
+    activity.title ||
+    activity.first_video?.original_filename ||
+    "未命名 Activity";
+  const videoStatus =
+    activity.video_count > 0
+      ? uploadStatusLabel(activity.upload_status)
+      : "无视频";
   const metaParts = [
     contentDate(activity.started_at ?? activity.created_at),
     formatActivityLocation(activity.location) !== "未记录位置"
@@ -1048,10 +1576,18 @@ function ProfileActivityRow({
     activity.activity_type === "match" ? "trophy-outline" : "fitness-outline";
 
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.activityWindowRow}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.activityWindowRow}
+    >
       <View style={styles.activityThumb}>
         {thumbnail ? (
-          <Image contentFit="cover" source={{ uri: thumbnail }} style={styles.activityThumbImage} />
+          <Image
+            contentFit="cover"
+            source={{ uri: thumbnail }}
+            style={styles.activityThumbImage}
+          />
         ) : (
           <View style={styles.activityThumbFallback}>
             <Ionicons color={colors.inverse} name={fallbackIcon} size={19} />
@@ -1065,9 +1601,29 @@ function ProfileActivityRow({
       </View>
       <View style={styles.activityWindowText}>
         <Text style={styles.windowTitle}>{title}</Text>
-        <Text numberOfLines={2} style={styles.windowMeta}>{metaParts.join(" · ")}</Text>
+        <Text numberOfLines={2} style={styles.windowMeta}>
+          {metaParts.join(" · ")}
+        </Text>
       </View>
       <Pill>{activityTypeLabel(activity.activity_type)}</Pill>
+      {onDelete ? (
+        <Pressable
+          accessibilityLabel="删除日记"
+          accessibilityRole="button"
+          disabled={deleting}
+          onPress={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          style={styles.activityDeleteButton}
+        >
+          {deleting ? (
+            <ActivityIndicator color={colors.clay} size="small" />
+          ) : (
+            <Ionicons color={colors.clay} name="trash-outline" size={18} />
+          )}
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -1087,7 +1643,9 @@ function ProfileLessonRow({ lesson }: { lesson: ProfileLesson }) {
       <View style={[styles.rowAccent, styles.rowAccentSky]} />
       <View style={styles.activityWindowText}>
         <Text style={styles.windowTitle}>{title}</Text>
-        <Text numberOfLines={2} style={styles.windowMeta}>{subtitle}</Text>
+        <Text numberOfLines={2} style={styles.windowMeta}>
+          {subtitle}
+        </Text>
       </View>
       <Pill>{lesson.role === "coach" ? "教练" : "学员"}</Pill>
     </View>
@@ -1103,13 +1661,23 @@ function ContentLoading({ text = "正在加载我的内容" }: { text?: string }
   );
 }
 
-function ContentError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ContentError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
   return (
     <View style={styles.contentStatePanel}>
       <IconBadge name="alert-circle-outline" tone="clay" />
       <Text style={styles.contentStateTitle}>加载失败</Text>
       <Text style={styles.contentStateText}>{message}</Text>
-      <Pressable accessibilityRole="button" onPress={onRetry} style={styles.retryButton}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onRetry}
+        style={styles.retryButton}
+      >
         <Text style={styles.retryButtonText}>重试</Text>
       </Pressable>
     </View>
@@ -1144,8 +1712,12 @@ function CoachWorkspace({
   const router = useRouter();
   const fullCoach = coachIdentity?.status === "certified_coach";
   const identityLabel = coachIdentity?.label ?? "教练";
-  const canManageCourses = Boolean(coachIdentity?.capabilities.course_management);
-  const canManageStudents = Boolean(coachIdentity?.capabilities.student_management);
+  const canManageCourses = Boolean(
+    coachIdentity?.capabilities.course_management,
+  );
+  const canManageStudents = Boolean(
+    coachIdentity?.capabilities.student_management,
+  );
 
   return (
     <View style={styles.profileBody}>
@@ -1153,7 +1725,9 @@ function CoachWorkspace({
         <View>
           <Text style={styles.profileHandle}>{identityLabel}工作台</Text>
           <Text style={styles.coachTopHint}>
-            {fullCoach ? "今天有 2 节课，2 条视频待点评" : "基础教学服务、视频点评和学员咨询"}
+            {fullCoach
+              ? "今天有 2 节课，2 条视频待点评"
+              : "基础教学服务、视频点评和学员咨询"}
           </Text>
         </View>
         <Pressable
@@ -1162,7 +1736,11 @@ function CoachWorkspace({
           onPress={onSwitchToPlayer}
           style={styles.modeButton}
         >
-          <Ionicons color={colors.accentDeep} name="tennisball-outline" size={16} />
+          <Ionicons
+            color={colors.accentDeep}
+            name="tennisball-outline"
+            size={16}
+          />
           <Text style={styles.modeButtonText}>球员模式</Text>
         </Pressable>
       </View>
@@ -1172,14 +1750,24 @@ function CoachWorkspace({
           <View>
             <Text style={styles.coachTitle}>教学概览</Text>
             <Text style={styles.coachSubtitle}>
-              {fullCoach ? "学员跟进、课程记录和视频点评集中处理" : "陪练、基础教学服务和视频点评集中处理"}
+              {fullCoach
+                ? "学员跟进、课程记录和视频点评集中处理"
+                : "陪练、基础教学服务和视频点评集中处理"}
             </Text>
           </View>
           <IconBadge name="school-outline" tone="sky" />
         </View>
         <View style={styles.coachStats}>
-          <ProfileStat inverse label={fullCoach ? "学员" : "服务"} value={fullCoach ? "28" : "3"} />
-          <ProfileStat inverse label={fullCoach ? "本周课" : "咨询"} value={fullCoach ? "11" : "6"} />
+          <ProfileStat
+            inverse
+            label={fullCoach ? "学员" : "服务"}
+            value={fullCoach ? "28" : "3"}
+          />
+          <ProfileStat
+            inverse
+            label={fullCoach ? "本周课" : "咨询"}
+            value={fullCoach ? "11" : "6"}
+          />
           <ProfileStat inverse label="待点评" value="2" />
         </View>
       </View>
@@ -1193,7 +1781,12 @@ function CoachWorkspace({
                 accessibilityLabel={`查看${student.name}档案`}
                 accessibilityRole="button"
                 key={student.id}
-                onPress={() => router.push({ pathname: "/student/[id]", params: { id: student.id } })}
+                onPress={() =>
+                  router.push({
+                    pathname: "/student/[id]",
+                    params: { id: student.id },
+                  })
+                }
                 style={styles.studentRow}
               >
                 <Avatar name={student.name} size={46} />
@@ -1206,7 +1799,11 @@ function CoachWorkspace({
                     {student.focus} · 最近上课 {student.lastLesson}
                   </Text>
                 </View>
-                <Ionicons color={colors.muted} name="chevron-forward" size={18} />
+                <Ionicons
+                  color={colors.muted}
+                  name="chevron-forward"
+                  size={18}
+                />
               </Pressable>
             ))}
           </View>
@@ -1215,8 +1812,16 @@ function CoachWorkspace({
         <View style={styles.section}>
           <SectionHeader title="可用服务" />
           <View style={styles.compactList}>
-            <RowButton icon="tennisball-outline" subtitle="陪练、基础教学、技术展示" title="发布基础教学服务" />
-            <RowButton icon="chatbubble-ellipses-outline" subtitle="接收学员咨询和初步沟通" title="学员咨询" />
+            <RowButton
+              icon="tennisball-outline"
+              subtitle="陪练、基础教学、技术展示"
+              title="发布基础教学服务"
+            />
+            <RowButton
+              icon="chatbubble-ellipses-outline"
+              subtitle="接收学员咨询和初步沟通"
+              title="学员咨询"
+            />
           </View>
         </View>
       )}
@@ -1268,7 +1873,9 @@ function CoachWorkspace({
         <SectionHeader title="教学记录" />
         <Card style={styles.noteCard}>
           <Text style={styles.noteTitle}>本周重点</Text>
-          <Text style={styles.noteText}>发球组继续观察抛球高度，青少年组记录正手击球点变化。</Text>
+          <Text style={styles.noteText}>
+            发球组继续观察抛球高度，青少年组记录正手击球点变化。
+          </Text>
         </Card>
       </View>
     </View>
@@ -1421,7 +2028,71 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "900",
   },
-  socialStats: {
+  coachIdentityEntry: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 5,
+    minHeight: 30,
+    paddingHorizontal: 10,
+  },
+  coachIdentityEntryText: {
+    color: colors.accentDeep,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  socialOverview: {
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  socialMetricGrid: {
+    flexDirection: "row",
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+  },
+  socialMetric: {
+    alignItems: "center",
+    flex: 1,
+    gap: 4,
+  },
+  socialMetricIcon: {
+    alignItems: "center",
+    borderRadius: radius.small,
+    height: 28,
+    justifyContent: "center",
+    marginBottom: 1,
+    width: 28,
+  },
+  socialMetricIconLikes: {
+    backgroundColor: colors.claySoft,
+  },
+  socialMetricIconFriends: {
+    backgroundColor: colors.accentSoft,
+  },
+  socialMetricIconFollowing: {
+    backgroundColor: colors.goldSoft,
+  },
+  socialMetricIconFollowers: {
+    backgroundColor: colors.skySoft,
+  },
+  socialMetricValue: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  socialMetricLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  contentStats: {
     backgroundColor: colors.surfaceWarm,
     borderColor: colors.line,
     borderRadius: radius.card,
@@ -1476,6 +2147,91 @@ const styles = StyleSheet.create({
   },
   playerTabTextActive: {
     color: colors.ink,
+  },
+  postContent: {
+    gap: 10,
+  },
+  postContentHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 38,
+  },
+  postContentTitle: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  postFilterButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: "center",
+    position: "relative",
+    width: 36,
+  },
+  postFilterButtonActive: {
+    backgroundColor: colors.accentSoft,
+    borderColor: "#D9E7EF",
+  },
+  postFilterIndicator: {
+    backgroundColor: colors.accentDeep,
+    borderColor: colors.surfaceWarm,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    height: 8,
+    position: "absolute",
+    right: 4,
+    top: 4,
+    width: 8,
+  },
+  postFilterBackdrop: {
+    flex: 1,
+  },
+  postFilterPopover: {
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.line,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    elevation: 8,
+    gap: 3,
+    minWidth: 152,
+    padding: 6,
+    position: "absolute",
+    shadowColor: colors.ink,
+    shadowOffset: { height: 6, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+  },
+  postFilterTitle: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  postFilterOption: {
+    alignItems: "center",
+    borderRadius: radius.small,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 42,
+    paddingHorizontal: 10,
+  },
+  postFilterOptionActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  postFilterOptionText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  postFilterOptionTextActive: {
+    color: colors.accentDeep,
   },
   contentGrid: {
     flexDirection: "row",
@@ -1628,6 +2384,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  activityDeleteButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 36,
+    minWidth: 36,
   },
   activityThumb: {
     backgroundColor: colors.ink,
