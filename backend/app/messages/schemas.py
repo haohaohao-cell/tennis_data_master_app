@@ -24,6 +24,13 @@ MessageType = Literal[
     "custom",
 ]
 AttachmentType = Literal["image", "video", "audio", "file", "object_card", "data_card", "link"]
+MessageImageMimeType = Literal["image/jpeg", "image/png", "image/webp", "image/gif"]
+MessageVideoMimeType = Literal["video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/3gpp"]
+MessageMediaMimeType = MessageImageMimeType | MessageVideoMimeType
+MessageMediaUploadStatus = Literal[
+    "created", "uploading", "uploaded", "attached", "failed", "expired", "deleted"
+]
+MessageMediaThumbnailStatus = Literal["pending", "generated", "failed"]
 ObjectType = Literal["user", "video", "social_post", "tennis_activity", "lesson", "analysis", "custom"]
 NotificationCategory = Literal["interaction", "system", "ai", "coach", "lesson"]
 NotificationEventType = Literal[
@@ -311,6 +318,7 @@ class GroupConversationCreate(BaseModel):
 
 class MessageAttachmentCreate(BaseModel):
     attachment_type: AttachmentType
+    media_id: str | None = Field(default=None, max_length=120)
     media_path: str | None = None
     thumbnail_path: str | None = None
     mime_type: str | None = Field(default=None, max_length=100)
@@ -322,7 +330,7 @@ class MessageAttachmentCreate(BaseModel):
     object_id: str | None = None
     payload: dict[str, Any] | None = None
 
-    @field_validator("media_path", "thumbnail_path", "mime_type", "object_id")
+    @field_validator("media_id", "media_path", "thumbnail_path", "mime_type", "object_id")
     @classmethod
     def normalize_text(cls, value: str | None) -> str | None:
         return _strip_text(value)
@@ -365,6 +373,13 @@ class MessageCreate(BaseModel):
             raise ValueError("target_object_type and target_object_id must be provided together.")
         if (self.context_object_type is None) != (self.context_object_id is None):
             raise ValueError("context_object_type and context_object_id must be provided together.")
+        if self.message_type in {"image", "video"}:
+            expected = self.message_type
+            if not self.attachments or any(
+                attachment.attachment_type != expected or not attachment.media_id
+                for attachment in self.attachments
+            ):
+                raise ValueError(f"{expected} messages require at least one matching message media attachment.")
         return self
 
 
@@ -407,6 +422,10 @@ class MessageAttachmentRecord(BaseModel):
     attachment_id: str
     message_id: str
     attachment_type: AttachmentType
+    media_id: str | None = None
+    media_state: MessageMediaUploadStatus | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
     media_path: str | None = None
     thumbnail_path: str | None = None
     mime_type: str | None = None
@@ -421,6 +440,68 @@ class MessageAttachmentRecord(BaseModel):
     created_at: str
 
 
+class MessageMediaUploadIntentCreate(BaseModel):
+    media_type: Literal["image", "video"] = "image"
+    mime_type: MessageMediaMimeType
+    file_size_bytes: int = Field(gt=0, le=200 * 1024 * 1024)
+    width_px: int = Field(gt=0, le=20_000)
+    height_px: int = Field(gt=0, le=20_000)
+    duration_ms: int | None = Field(default=None, ge=1, le=5 * 60 * 1000)
+    expected_checksum_sha256: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    client_upload_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9._:-]+$")
+
+    @model_validator(mode="after")
+    def validate_media_kind(self) -> "MessageMediaUploadIntentCreate":
+        if self.media_type == "image" and not self.mime_type.startswith("image/"):
+            raise ValueError("image media requires an image MIME type.")
+        if self.media_type == "video" and not self.mime_type.startswith("video/"):
+            raise ValueError("video media requires a video MIME type.")
+        if self.media_type == "video" and self.duration_ms is None:
+            raise ValueError("video media requires duration_ms.")
+        if self.media_type == "image" and self.duration_ms is not None:
+            raise ValueError("image media cannot have a duration.")
+        return self
+
+
+class MessageMediaRecord(BaseModel):
+    media_id: str
+    owner_user_id: str
+    message_id: str | None = None
+    media_type: Literal["image", "video"]
+    upload_status: MessageMediaUploadStatus
+    mime_type: str
+    file_size_bytes: int
+    width_px: int
+    height_px: int
+    duration_ms: int | None = None
+    checksum_sha256: str | None = None
+    expected_checksum_sha256: str | None = None
+    container: str | None = None
+    codec: str | None = None
+    client_upload_id: str
+    created_at: str
+    uploaded_at: str | None = None
+    attached_at: str | None = None
+    expires_at: str
+    deleted_at: str | None = None
+    failure_code: str | None = None
+    thumbnail_status: MessageMediaThumbnailStatus = "pending"
+    thumbnail_failure_code: str | None = None
+    storage_deleted_at: str | None = None
+    last_cleanup_error: str | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
+
+
+class MessageMediaResponse(BaseModel):
+    media: MessageMediaRecord
+
+
+class MessageMediaUploadIntentResponse(MessageMediaResponse):
+    upload_url: str
+    complete_url: str
+
+
 class MessageReplyPreview(BaseModel):
     """A privacy-safe, server-hydrated summary of a referenced message."""
 
@@ -430,6 +511,44 @@ class MessageReplyPreview(BaseModel):
     sender_user_id: str | None = None
     sender_nickname: str | None = None
     text_content: str | None = None
+
+
+class PostShareCardAuthor(BaseModel):
+    user_id: str
+    nickname: str
+    avatar_path: str | None = None
+
+
+class PostShareCard(BaseModel):
+    """Minimal, authorization-sensitive representation of a shared Post."""
+
+    state: Literal["available", "unavailable"]
+    post_id: str
+    reason: Literal["not_found_or_no_access"] | None = None
+    title: str | None = None
+    summary: str | None = None
+    cover_url: str | None = None
+    author: PostShareCardAuthor | None = None
+    visibility: str | None = None
+
+
+BusinessObjectCardState = Literal["available", "unavailable", "unsupported"]
+BusinessObjectCardType = Literal["social_post", "video", "tennis_activity", "lesson", "analysis"]
+
+
+class BusinessObjectCard(BaseModel):
+    """Extensible, current-authorization presentation shell for referenced domain objects."""
+
+    kind: Literal["business_object"] = "business_object"
+    object_type: BusinessObjectCardType
+    object_id: str
+    state: BusinessObjectCardState
+    title: str | None = None
+    summary: str | None = None
+    cover_url: str | None = None
+    author: PostShareCardAuthor | None = None
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    unavailable_reason: Literal["not_found_or_no_access", "unsupported_object_type"] | None = None
 
 
 class ChatMessageRecord(BaseModel):
@@ -447,6 +566,8 @@ class ChatMessageRecord(BaseModel):
     context_object_id: str | None = None
     reply_to_message_id: str | None = None
     reply_preview: MessageReplyPreview | None = None
+    business_object_card: BusinessObjectCard | None = None
+    share_card: PostShareCard | None = None
     client_message_id: str | None = None
     status: str
     sent_at: str
@@ -559,6 +680,42 @@ class MessageRequestActionResponse(BaseModel):
 
 class MessageSendResponse(BaseModel):
     message: ChatMessageRecord
+    event_id: str | None = None
+
+
+class MessageRecoveryResponse(BaseModel):
+    found: bool
+    message: ChatMessageRecord | None = None
+    event_id: str | None = None
+
+
+class OutboxEventRecord(BaseModel):
+    event_id: str
+    aggregate_type: Literal["chat_message"]
+    aggregate_id: str
+    event_type: Literal["message.created"]
+    event_version: int
+    actor_user_id: str | None = None
+    conversation_id: str
+    message_id: str
+    message_seq: int
+    payload_json: str
+    status: Literal["pending", "leased", "processed", "failed"]
+    attempt_count: int
+    available_at: str
+    leased_at: str | None = None
+    lease_owner: str | None = None
+    processed_at: str | None = None
+    next_attempt_at: str | None = None
+    last_error_code: str | None = None
+    last_error_message: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class MessageEventListResponse(BaseModel):
+    items: list[OutboxEventRecord]
+    next_cursor: str | None = None
 
 
 class MarkReadResponse(BaseModel):

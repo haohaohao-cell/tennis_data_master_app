@@ -28,7 +28,7 @@ for status in (400, 401, 403, 404, 409, 422):
 for fragment in (
     "local_retryable?: boolean",
     "local_status: \"failed\" as const",
-    "local_retryable: isRetryableSendError(sendError)",
+    "const retryable = isRetryableSendError(sendError)",
     "failed && message.local_error",
     "{message.local_error}",
     "styles.messageError",
@@ -44,7 +44,21 @@ for fragment in (
     assert fragment in chat, fragment
 
 assert chat.count("AppState.addEventListener") == 1
-for forbidden in ("NetInfo", "expo-network", "AsyncStorage", "outbox", "automatic retry"):
-    assert forbidden not in api + chat, forbidden
+outbox = (APP_DIR / "api" / "messageOutbox.ts").read_text(encoding="utf-8")
+for fragment in (
+    "@react-native-async-storage/async-storage",
+    "enqueueLocalMessage",
+    "recoverLocalMessageOutbox",
+    "recoverMessageByClientId",
+    '"failed_retryable"',
+    '"failed_permanent"',
+    "server_message_id",
+    "clearLocalDraft",
+    "local_state === \"sending\"",
+    "next_retry_at",
+    "TERMINAL_RETENTION_MS",
+    'item.local_state === "sent"',
+):
+    assert fragment in outbox + api + chat, fragment
 
 print("Message send resilience static test passed.")

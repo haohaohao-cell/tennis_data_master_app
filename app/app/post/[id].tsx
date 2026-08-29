@@ -59,6 +59,10 @@ function detailErrorMessage(error: unknown) {
   return "动态详情加载失败，请稍后重试。";
 }
 
+function createPostShareClientMessageId(postId: string, conversationId: string) {
+  return `post-share:${postId}:${conversationId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function formatCount(value: number | null | undefined) {
   const count = value ?? 0;
   if (count >= 10000) {
@@ -172,6 +176,7 @@ export default function PostDetailScreen() {
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
+  const shareAttemptIdsRef = useRef(new Map<string, string>());
   const reportedDetailViewIdsRef = useRef<Set<string>>(new Set());
   const watchStartRef = useRef<number | null>(null);
   const watchAccumRef = useRef<number>(0);
@@ -446,11 +451,17 @@ export default function PostDetailScreen() {
         return;
       }
       setInteractionPending("share");
+      const attemptKey = `${activePostId}:${conversationId}`;
+      const clientMessageId = shareAttemptIdsRef.current.get(attemptKey)
+        ?? createPostShareClientMessageId(activePostId, conversationId);
+      shareAttemptIdsRef.current.set(attemptKey, clientMessageId);
       void sharePost(accessToken, activePostId, {
+        clientMessageId,
         conversationId,
         messageText: detail?.post.title ?? "分享了一条网球动态",
       })
         .then((response) => {
+          shareAttemptIdsRef.current.delete(attemptKey);
           setDetail((current) => (current ? { ...current, stats: response.stats } : current));
           setShareOpen(false);
           Alert.alert("分享成功", "动态已发送到站内会话。");

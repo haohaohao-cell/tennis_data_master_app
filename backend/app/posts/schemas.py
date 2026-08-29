@@ -228,9 +228,10 @@ class PostShareCreate(BaseModel):
     conversation_id: str | None = None
     channel: str | None = Field(default=None, max_length=50)
     message_text: str | None = Field(default=None, max_length=500)
+    client_message_id: str | None = Field(default=None, max_length=120)
     payload: dict[str, Any] | None = None
 
-    @field_validator("conversation_id", "channel", "message_text")
+    @field_validator("conversation_id", "channel", "message_text", "client_message_id")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         return _strip_text(value)
@@ -239,6 +240,8 @@ class PostShareCreate(BaseModel):
     def validate_target(self) -> "PostShareCreate":
         if self.share_target_type == "conversation" and not self.conversation_id:
             raise ValueError("conversation_id is required when sharing to a conversation.")
+        if self.share_target_type == "conversation" and not self.client_message_id:
+            raise ValueError("client_message_id is required when sharing to a conversation.")
         if self.share_target_type != "conversation" and self.conversation_id:
             raise ValueError("conversation_id is only valid for conversation shares.")
         return self
@@ -253,6 +256,7 @@ class PostShareRecord(BaseModel):
     conversation_id: str | None = None
     message_id: str | None = None
     channel: str | None = None
+    client_message_id: str | None = None
     payload_json: str | None = None
     created_at: str
 

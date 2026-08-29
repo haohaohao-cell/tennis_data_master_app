@@ -1,4 +1,4 @@
-import { ApiError, apiRequest } from "@/api/client";
+import { ApiError, apiRequest, apiUpload } from "@/api/client";
 
 export const MESSAGE_SEND_TIMEOUT_MS = 15_000;
 
@@ -40,6 +40,26 @@ export type MessageType =
   | "analysis_card"
   | "system_event"
   | "custom";
+
+export type MessageCreateInput = {
+  message_type: MessageType;
+  text_content: string | null;
+  payload?: Record<string, unknown> | null;
+  target_object_type?: string | null;
+  target_object_id?: string | null;
+  context_object_type?: string | null;
+  context_object_id?: string | null;
+  reply_to_message_id?: string | null;
+  client_message_id: string;
+  attachments?: Array<{
+    attachment_type: string;
+    media_id?: string | null;
+    mime_type?: string | null;
+    file_size_bytes?: number | null;
+    width_px?: number | null;
+    height_px?: number | null;
+  }>;
+};
 
 export type MessageUserSummary = {
   avatar_path: string | null;
@@ -125,6 +145,10 @@ export type ConversationCreateResponse = {
 export type MessageAttachmentRecord = {
   attachment_id: string;
   attachment_type: string;
+  media_id: string | null;
+  media_state: "created" | "uploading" | "uploaded" | "attached" | "failed" | "expired" | "deleted" | null;
+  media_url: string | null;
+  thumbnail_url: string | null;
   created_at: string;
   duration_ms: number | null;
   file_size_bytes: number | null;
@@ -149,8 +173,73 @@ export type MessageReplyPreview = {
   text_content: string | null;
 };
 
+export type MessageMediaRecord = {
+  media_id: string;
+  owner_user_id: string;
+  message_id: string | null;
+  media_type: "image" | "video";
+  upload_status: "created" | "uploading" | "uploaded" | "attached" | "failed" | "expired" | "deleted";
+  mime_type: string;
+  file_size_bytes: number;
+  width_px: number;
+  height_px: number;
+  duration_ms: number | null;
+  checksum_sha256: string | null;
+  expected_checksum_sha256: string | null;
+  container: string | null;
+  codec: string | null;
+  client_upload_id: string;
+  created_at: string;
+  uploaded_at: string | null;
+  attached_at: string | null;
+  expires_at: string;
+  deleted_at: string | null;
+  failure_code: string | null;
+  thumbnail_status: "pending" | "generated" | "failed";
+  thumbnail_failure_code: string | null;
+  storage_deleted_at: string | null;
+  last_cleanup_error: string | null;
+  media_url: string | null;
+  thumbnail_url: string | null;
+};
+
+export type MessageMediaResponse = { media: MessageMediaRecord };
+export type MessageMediaUploadIntentResponse = MessageMediaResponse & {
+  upload_url: string;
+  complete_url: string;
+};
+
+export type PostShareCard = {
+  author: {
+    avatar_path: string | null;
+    nickname: string;
+    user_id: string;
+  } | null;
+  cover_url: string | null;
+  post_id: string;
+  reason: "not_found_or_no_access" | null;
+  state: "available" | "unavailable";
+  summary: string | null;
+  title: string | null;
+  visibility: string | null;
+};
+
+export type BusinessObjectCard = {
+  author: PostShareCard["author"];
+  cover_url: string | null;
+  kind: "business_object";
+  metadata: Record<string, boolean | number | string | null>;
+  object_id: string;
+  object_type: "social_post" | "video" | "tennis_activity" | "lesson" | "analysis";
+  state: "available" | "unavailable" | "unsupported";
+  summary: string | null;
+  title: string | null;
+  unavailable_reason: "not_found_or_no_access" | "unsupported_object_type" | null;
+};
+
 export type ChatMessageRecord = {
   attachments: MessageAttachmentRecord[];
+  business_object_card: BusinessObjectCard | null;
   client_message_id: string | null;
   context_object_id: string | null;
   context_object_type: string | null;
@@ -166,6 +255,7 @@ export type ChatMessageRecord = {
   sender: MessageUserSummary | null;
   sender_type: string;
   sender_user_id: string | null;
+  share_card: PostShareCard | null;
   sent_at: string;
   status: string;
   target_object_id: string | null;
@@ -195,6 +285,42 @@ export type DirectConversationInteractionState = {
 
 export type MessageSendResponse = {
   message: ChatMessageRecord;
+  event_id: string | null;
+};
+
+export type MessageRecoveryResponse = {
+  found: boolean;
+  message: ChatMessageRecord | null;
+  event_id: string | null;
+};
+
+export type OutboxEventRecord = {
+  event_id: string;
+  aggregate_type: "chat_message";
+  aggregate_id: string;
+  event_type: "message.created";
+  event_version: number;
+  actor_user_id: string | null;
+  conversation_id: string;
+  message_id: string;
+  message_seq: number;
+  payload_json: string;
+  status: "pending" | "leased" | "processed" | "failed";
+  attempt_count: number;
+  available_at: string;
+  leased_at: string | null;
+  lease_owner: string | null;
+  processed_at: string | null;
+  next_attempt_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MessageEventListResponse = {
+  items: OutboxEventRecord[];
+  next_cursor: string | null;
 };
 
 export type MessageRequestRecord = {
@@ -409,6 +535,144 @@ export function sendTextMessage(
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
     }
+  });
+}
+
+export function recoverMessageByClientId(
+  accessToken: string,
+  conversationId: string,
+  clientMessageId: string,
+) {
+  return apiRequest<MessageRecoveryResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/by-client-id/${encodeURIComponent(clientMessageId)}`,
+    { accessToken, captureDiagnostics: false },
+  );
+}
+
+export function listMessageEvents(
+  accessToken: string,
+  conversationId: string,
+  options: { cursor?: string | null; limit?: number } = {},
+) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 50) });
+  if (options.cursor) {
+    params.set("cursor", options.cursor);
+  }
+  return apiRequest<MessageEventListResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/events?${params.toString()}`,
+    { accessToken, captureDiagnostics: false },
+  );
+}
+
+export function createMessageImageUploadIntent(
+  accessToken: string,
+  payload: {
+    mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+    fileSizeBytes: number;
+    widthPx: number;
+    heightPx: number;
+    clientUploadId: string;
+  },
+) {
+  return apiRequest<MessageMediaUploadIntentResponse>("/api/v1/messages/media/upload-intents", {
+    accessToken,
+    body: {
+      client_upload_id: payload.clientUploadId,
+      file_size_bytes: payload.fileSizeBytes,
+      height_px: payload.heightPx,
+      mime_type: payload.mimeType,
+      media_type: "image",
+      width_px: payload.widthPx,
+    },
+    method: "POST",
+  });
+}
+
+export function createMessageVideoUploadIntent(
+  accessToken: string,
+  payload: { mimeType: "video/mp4" | "video/quicktime" | "video/webm" | "video/x-matroska" | "video/3gpp"; fileSizeBytes: number; widthPx: number; heightPx: number; durationMs: number; clientUploadId: string; expectedChecksumSha256?: string },
+) {
+  return apiRequest<MessageMediaUploadIntentResponse>("/api/v1/messages/media/upload-intents", {
+    accessToken,
+    body: { client_upload_id: payload.clientUploadId, file_size_bytes: payload.fileSizeBytes, height_px: payload.heightPx, mime_type: payload.mimeType, media_type: "video", width_px: payload.widthPx, duration_ms: payload.durationMs, expected_checksum_sha256: payload.expectedChecksumSha256 ?? null },
+    method: "POST",
+  });
+}
+
+/** Upload raw bytes for either an image or a video message media intent. */
+export function uploadMessageMediaFile(
+  accessToken: string,
+  mediaId: string,
+  file: Blob | { uri: string; name: string; type: string },
+  filename?: string,
+) {
+  return apiUpload<MessageMediaResponse>(`/api/v1/messages/media/${encodeURIComponent(mediaId)}/file`, accessToken, file, filename);
+}
+
+/** @deprecated Use uploadMessageMediaFile for new message-media callers. */
+export function uploadMessageImageFile(
+  accessToken: string,
+  mediaId: string,
+  file: Blob | { uri: string; name: string; type: string },
+  filename?: string,
+) {
+  return uploadMessageMediaFile(accessToken, mediaId, file, filename);
+}
+
+export function completeMessageMediaUpload(accessToken: string, mediaId: string) {
+  return apiRequest<MessageMediaResponse>(`/api/v1/messages/media/${encodeURIComponent(mediaId)}/complete`, {
+    accessToken,
+    method: "POST",
+  });
+}
+
+export function cancelMessageMediaUpload(accessToken: string, mediaId: string) {
+  return apiRequest<MessageMediaResponse>(`/api/v1/messages/media/${encodeURIComponent(mediaId)}/cancel`, {
+    accessToken,
+    method: "POST",
+  });
+}
+
+/** @deprecated Use completeMessageMediaUpload for all message-media types. */
+export function completeMessageImageUpload(accessToken: string, mediaId: string) {
+  return completeMessageMediaUpload(accessToken, mediaId);
+}
+
+/** @deprecated Use cancelMessageMediaUpload for all message-media types. */
+export function cancelMessageImageUpload(accessToken: string, mediaId: string) {
+  return cancelMessageMediaUpload(accessToken, mediaId);
+}
+
+export function sendImageMessage(
+  accessToken: string,
+  conversationId: string,
+  mediaId: string,
+  clientMessageId: string,
+  textContent?: string | null,
+  replyToMessageId?: string | null,
+) {
+  return apiRequest<MessageSendResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      accessToken,
+      captureDiagnostics: false,
+      body: {
+        attachments: [{ attachment_type: "image", media_id: mediaId }],
+        client_message_id: clientMessageId,
+        message_type: "image",
+        reply_to_message_id: replyToMessageId ?? null,
+        text_content: textContent?.trim() || null,
+      },
+      method: "POST",
+    },
+  );
+}
+
+export function sendVideoMessage(accessToken: string, conversationId: string, mediaId: string, clientMessageId: string, textContent?: string | null, replyToMessageId?: string | null) {
+  return apiRequest<MessageSendResponse>(`/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    accessToken, captureDiagnostics: false,
+    body: { attachments: [{ attachment_type: "video", media_id: mediaId }], client_message_id: clientMessageId, message_type: "video", reply_to_message_id: replyToMessageId ?? null, text_content: textContent?.trim() || null },
+    method: "POST",
   });
 }
 

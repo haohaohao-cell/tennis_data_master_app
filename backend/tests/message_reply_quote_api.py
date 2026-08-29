@@ -104,9 +104,9 @@ async def main() -> None:
         before_retry = (await asgi_request(app, "GET", "/api/v1/messages/unread-counts", headers=alice_headers)).json_body
         retry_first = await send(app, bob_headers, ab_id, "One logical reply", "reply-idempotent", original["message_id"])
         retry_second = await send(app, bob_headers, ab_id, "Mutated reply", "reply-idempotent", basic["message_id"])
-        assert retry_first.status == retry_second.status == 201
-        assert retry_first.json_body["message"]["message_id"] == retry_second.json_body["message"]["message_id"]
-        assert retry_second.json_body["message"]["reply_to_message_id"] == original["message_id"]
+        assert retry_first.status == 201
+        assert retry_second.status == 409
+        assert retry_second.json_body["detail"]["code"] == "CLIENT_MESSAGE_ID_CONFLICT"
         after_retry = (await asgi_request(app, "GET", "/api/v1/messages/unread-counts", headers=alice_headers)).json_body
         assert after_retry["unread_direct_message_count"] == before_retry["unread_direct_message_count"] + 1
 

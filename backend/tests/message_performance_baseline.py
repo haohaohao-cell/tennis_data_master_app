@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
+import json
 from urllib.parse import urlencode
 
 
@@ -29,6 +30,11 @@ def percentile_95(samples_ms: list[float]) -> float:
     return ordered[max(0, int(len(ordered) * 0.95 + 0.999999) - 1)]
 
 
+def percentile_99(samples_ms: list[float]) -> float:
+    ordered = sorted(samples_ms)
+    return ordered[max(0, int(len(ordered) * 0.99 + 0.999999) - 1)]
+
+
 async def measure(operation: Callable[[], Awaitable[AsgiResponse]]) -> dict[str, float | int]:
     for _ in range(WARMUP_SAMPLES):
         response = await operation()
@@ -46,6 +52,7 @@ async def measure(operation: Callable[[], Awaitable[AsgiResponse]]) -> dict[str,
         "min_ms": min(samples_ms),
         "p50_ms": statistics.median(samples_ms),
         "p95_ms": percentile_95(samples_ms),
+        "p99_ms": percentile_99(samples_ms),
         "samples": len(samples_ms),
     }
 
@@ -60,38 +67,6 @@ def seed_scale(
 ) -> str:
     target_conversation_id = f"benchmark-{scale_name.lower()}-000"
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE chat_conversation_members
-            SET last_read_message_id = NULL, last_read_message_seq = 0
-            WHERE conversation_id LIKE 'benchmark-%';
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM post_shares
-            WHERE message_id IN (
-                SELECT message_id FROM chat_messages WHERE conversation_id LIKE 'benchmark-%'
-            );
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM chat_message_attachments
-            WHERE message_id IN (
-                SELECT message_id FROM chat_messages WHERE conversation_id LIKE 'benchmark-%'
-            );
-            """
-        )
-        connection.execute(
-            "DELETE FROM chat_messages WHERE conversation_id LIKE 'benchmark-%';"
-        )
-        connection.execute(
-            "DELETE FROM chat_conversation_members WHERE conversation_id LIKE 'benchmark-%';"
-        )
-        connection.execute(
-            "DELETE FROM chat_conversations WHERE conversation_id LIKE 'benchmark-%';"
-        )
         for conversation_index in range(conversation_count):
             conversation_id = f"benchmark-{scale_name.lower()}-{conversation_index:03d}"
             last_message_id = f"benchmark-message-{scale_name.lower()}-{conversation_index:03d}-{messages_per_conversation:04d}"
@@ -200,13 +175,18 @@ async def benchmark_scale(
     for name, result in results.items():
         print(
             f"  {name}: samples={result['samples']} min={result['min_ms']:.2f}ms "
-            f"p50={result['p50_ms']:.2f}ms p95={result['p95_ms']:.2f}ms max={result['max_ms']:.2f}ms"
+            f"p50={result['p50_ms']:.2f}ms p95={result['p95_ms']:.2f}ms "
+            f"p99={result['p99_ms']:.2f}ms max={result['max_ms']:.2f}ms"
         )
     return results
 
 
 async def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
+        # This is a local diagnostic baseline, not a CI latency gate. Isolate
+        # it from any configured PostgreSQL runtime before importing the app.
+        os.environ.pop("TENNIS_DATABASE_URL", None)
+        os.environ.pop("TENNIS_POSTGRES_DSN", None)
         os.environ["TENNIS_DB_PATH"] = str(Path(temp_dir) / "message_performance_baseline.sqlite3")
 
         from backend.app.core.database import get_connection, initialize_database
@@ -220,8 +200,9 @@ async def main() -> None:
         alice_headers = {"authorization": f"Bearer {alice_token}"}
         bob_headers = {"authorization": f"Bearer {bob_token}"}
 
+        results: dict[str, object] = {}
         for scale_name, conversation_count, messages_per_conversation in SCALES:
-            await benchmark_scale(
+            results[scale_name.lower()] = await benchmark_scale(
                 app,
                 get_connection,
                 alice_headers,
@@ -231,6 +212,21 @@ async def main() -> None:
                 scale_name,
                 conversation_count,
                 messages_per_conversation,
+            )
+        report_path = os.getenv("TENNIS_PERFORMANCE_REPORT")
+        if report_path:
+            Path(report_path).write_text(
+                json.dumps({
+                    "report_type": "local_message_performance_baseline",
+                    "database_type": "SQLite",
+                    "ci_latency_gate": False,
+                    "samples_per_operation": MEASUREMENT_SAMPLES,
+                    "warmup_samples": WARMUP_SAMPLES,
+                    "scales": results,
+                    "errors": 0,
+                    "timeouts": 0,
+                }, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
             )
 
 

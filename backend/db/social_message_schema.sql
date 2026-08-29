@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS user_privacy_settings (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+-- Incremental upgrade for databases created before the full schema included
+-- notification preferences. Keep this definition aligned with schema.sql.
 CREATE TABLE IF NOT EXISTS user_notification_preferences (
     user_id TEXT PRIMARY KEY,
     direct_message_notifications INTEGER NOT NULL DEFAULT 1
@@ -260,6 +262,71 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     FOREIGN KEY (reply_to_message_id) REFERENCES chat_messages(message_id)
 );
 
+-- Stage 9: durable message events for replay and future consumers.
+CREATE TABLE IF NOT EXISTS outbox_events (
+    event_id TEXT PRIMARY KEY,
+    aggregate_type TEXT NOT NULL CHECK (aggregate_type = 'chat_message'),
+    aggregate_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type = 'message.created'),
+    event_version INTEGER NOT NULL DEFAULT 1 CHECK (event_version >= 1),
+    actor_user_id TEXT,
+    conversation_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    message_seq INTEGER NOT NULL CHECK (message_seq >= 1),
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'leased', 'processed', 'failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    leased_at TEXT,
+    lease_owner TEXT,
+    processed_at TEXT,
+    next_attempt_at TEXT,
+    last_error_code TEXT CHECK (last_error_code IS NULL OR length(last_error_code) <= 80),
+    last_error_message TEXT CHECK (last_error_message IS NULL OR length(last_error_message) <= 500),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (actor_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    UNIQUE (event_type, message_id, event_version)
+);
+
+CREATE TABLE IF NOT EXISTS chat_message_media (
+    media_id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    message_id TEXT,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+    upload_status TEXT NOT NULL DEFAULT 'created'
+        CHECK (upload_status IN ('created', 'uploading', 'uploaded', 'attached', 'failed', 'expired', 'deleted')),
+    storage_key TEXT NOT NULL,
+    thumbnail_storage_key TEXT,
+    mime_type TEXT NOT NULL CHECK (length(mime_type) <= 100),
+    file_size_bytes INTEGER NOT NULL CHECK (file_size_bytes > 0),
+    width_px INTEGER NOT NULL CHECK (width_px > 0),
+    height_px INTEGER NOT NULL CHECK (height_px > 0),
+    duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms > 0),
+    checksum_sha256 TEXT CHECK (checksum_sha256 IS NULL OR length(checksum_sha256) = 64),
+    expected_checksum_sha256 TEXT CHECK (expected_checksum_sha256 IS NULL OR length(expected_checksum_sha256) = 64),
+    container TEXT CHECK (container IS NULL OR length(container) <= 50),
+    codec TEXT CHECK (codec IS NULL OR length(codec) <= 100),
+    client_upload_id TEXT NOT NULL CHECK (length(client_upload_id) BETWEEN 1 AND 120),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    uploaded_at TEXT,
+    attached_at TEXT,
+    expires_at TEXT NOT NULL,
+    deleted_at TEXT,
+    failure_code TEXT CHECK (failure_code IS NULL OR length(failure_code) <= 80),
+    thumbnail_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (thumbnail_status IN ('pending', 'generated', 'failed')),
+    thumbnail_failure_code TEXT CHECK (thumbnail_failure_code IS NULL OR length(thumbnail_failure_code) <= 80),
+    storage_deleted_at TEXT,
+    last_cleanup_error TEXT CHECK (last_cleanup_error IS NULL OR length(last_cleanup_error) <= 255),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE SET NULL,
+    UNIQUE (owner_user_id, client_upload_id)
+);
+
 CREATE TABLE IF NOT EXISTS post_shares (
     post_share_id TEXT PRIMARY KEY,
     social_post_id TEXT NOT NULL,
@@ -270,6 +337,8 @@ CREATE TABLE IF NOT EXISTS post_shares (
     conversation_id TEXT,
     message_id TEXT,
     channel TEXT CHECK (channel IS NULL OR length(channel) <= 50),
+    message_text TEXT CHECK (message_text IS NULL OR length(message_text) <= 500),
+    client_message_id TEXT CHECK (client_message_id IS NULL OR length(client_message_id) <= 120),
     payload_json TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (
@@ -348,6 +417,7 @@ CREATE TABLE IF NOT EXISTS chat_message_attachments (
     attachment_type TEXT NOT NULL
         CHECK (attachment_type IN ('image', 'video', 'audio', 'file', 'object_card', 'data_card', 'link')),
     media_path TEXT,
+    media_id TEXT,
     thumbnail_path TEXT,
     mime_type TEXT CHECK (mime_type IS NULL OR length(mime_type) <= 100),
     file_size_bytes INTEGER CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0),
@@ -363,7 +433,8 @@ CREATE TABLE IF NOT EXISTS chat_message_attachments (
     sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((object_type IS NULL AND object_id IS NULL) OR (object_type IS NOT NULL AND object_id IS NOT NULL)),
-    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    FOREIGN KEY (media_id) REFERENCES chat_message_media(media_id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS notification_events (
@@ -571,6 +642,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_messages_client_message
     ON chat_messages(sender_user_id, client_message_id)
     WHERE client_message_id IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_outbox_events_available
+    ON outbox_events(status, available_at, created_at, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_events_conversation_seq
+    ON outbox_events(conversation_id, message_seq, created_at, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_events_message
+    ON outbox_events(message_id);
+
 CREATE INDEX IF NOT EXISTS idx_post_shares_post_created
     ON post_shares(social_post_id, created_at DESC);
 
@@ -580,6 +660,10 @@ CREATE INDEX IF NOT EXISTS idx_post_shares_user_created
 CREATE INDEX IF NOT EXISTS idx_post_shares_conversation
     ON post_shares(conversation_id, created_at DESC)
     WHERE conversation_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_post_shares_sender_client_message
+    ON post_shares(shared_by_user_id, client_message_id)
+    WHERE client_message_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_created
     ON chat_messages(conversation_id, message_seq DESC);
@@ -595,6 +679,21 @@ CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_sort
 
 CREATE INDEX IF NOT EXISTS idx_chat_attachments_object
     ON chat_message_attachments(object_type, object_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_attachments_media_unique
+    ON chat_message_attachments(media_id)
+    WHERE media_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_media_owner_status
+    ON chat_message_media(owner_user_id, upload_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_message_media_type_status_expiry
+    ON chat_message_media(media_type, upload_status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_media_message
+    ON chat_message_media(message_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_message_media_owner_client
+    ON chat_message_media(owner_user_id, client_upload_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_events_dedup
     ON notification_events(dedup_key)

@@ -14,6 +14,7 @@ from backend.app.core.time import to_iso, utc_now, utc_now_iso
 from backend.app.messages.schemas import (
     ChatConversationRecord,
     ChatMessageRecord,
+    BusinessObjectCard,
     ConversationCreateResponse,
     ConversationListItem,
     ConversationListResponse,
@@ -41,6 +42,8 @@ from backend.app.messages.schemas import (
     MessageReplyPreview,
     MessageSendResponse,
     MessageUserSummary,
+    PostShareCard,
+    PostShareCardAuthor,
     MarkReadRequest,
     NotificationEventRecord,
     NotificationPreferenceKind,
@@ -52,6 +55,9 @@ from backend.app.messages.schemas import (
     UserNotificationRecord,
     UnreadCountsResponse,
 )
+from backend.app.messages import media_service
+from backend.app.messages import outbox
+from backend.app.messages.media_storage import storage_path
 
 
 NOTIFICATION_PREFERENCE_FIELDS = (
@@ -856,7 +862,7 @@ def create_direct_conversation(
     if user_id == target_user_id:
         raise_api_error(status.HTTP_400_BAD_REQUEST, "CANNOT_MESSAGE_SELF", "You cannot message yourself.")
 
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"direct-conversation:{_pair_key(user_id, target_user_id)}") as connection:
         _ensure_active_user(connection, user_id)
         _ensure_active_user(connection, target_user_id)
         _ensure_not_blocked(connection, user_id, target_user_id)
@@ -1110,7 +1116,7 @@ def set_conversation_pin(
     conversation_id: str,
     pinned: bool,
 ) -> ConversationPinResponse:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"conversation-member:{user_id}:{conversation_id}") as connection:
         _ensure_active_user(connection, user_id)
         member = _select_member(connection, conversation_id, user_id)
         pinned_at = member["pinned_at"]
@@ -1147,7 +1153,7 @@ def set_conversation_mute(
     muted: bool,
 ) -> ConversationMuteResponse:
     """Mute only the caller's active membership for the fixed 24-hour product period."""
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"conversation-member:{user_id}:{conversation_id}") as connection:
         _ensure_active_user(connection, user_id)
         member = _select_member(connection, conversation_id, user_id)
         muted_until = member["muted_until"]
@@ -1185,7 +1191,7 @@ def set_conversation_hidden(
     hidden: bool,
 ) -> ConversationHideResponse:
     """Hide only the caller's membership without changing message state or preferences."""
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"conversation-member:{user_id}:{conversation_id}") as connection:
         _ensure_active_user(connection, user_id)
         member = _select_member(connection, conversation_id, user_id)
         archived_at = member["archived_at"]
@@ -1281,6 +1287,167 @@ def _message_preview(payload: MessageCreate) -> str:
     return labels.get(payload.message_type, "[Message]")
 
 
+def _batch_social_post_cards(
+    connection: sqlite3.Connection,
+    post_ids: set[str],
+    viewer_user_id: str | None,
+) -> dict[str, BusinessObjectCard]:
+    """Load post cards and authorization inputs in bounded queries for one message page."""
+    if not post_ids:
+        return {}
+    unavailable = {
+        post_id: BusinessObjectCard(
+            object_type="social_post",
+            object_id=post_id,
+            state="unavailable",
+            unavailable_reason="not_found_or_no_access",
+        )
+        for post_id in post_ids
+    }
+    if not viewer_user_id:
+        return unavailable
+
+    placeholders = ", ".join("?" for _ in post_ids)
+    posts = connection.execute(
+        f"""
+        SELECT social_posts.*, authors.nickname AS author_nickname,
+               authors.avatar_path AS author_avatar_path
+        FROM social_posts
+        JOIN users AS authors ON authors.user_id = social_posts.author_user_id
+        WHERE social_posts.social_post_id IN ({placeholders})
+          AND social_posts.status = 'published'
+          AND social_posts.review_status = 'approved'
+          AND social_posts.deleted_at IS NULL
+          AND authors.status = 'active'
+          AND authors.deleted_at IS NULL;
+        """,
+        tuple(post_ids),
+    ).fetchall()
+    posts_by_id = {post["social_post_id"]: post for post in posts}
+    author_ids = {post["author_user_id"] for post in posts}
+    blocked_authors: set[str] = set()
+    if author_ids:
+        author_placeholders = ", ".join("?" for _ in author_ids)
+        block_rows = connection.execute(
+            f"""
+            SELECT blocker_user_id, blocked_user_id
+            FROM user_blocks
+            WHERE deleted_at IS NULL
+              AND ((blocker_user_id = ? AND blocked_user_id IN ({author_placeholders}))
+                OR (blocked_user_id = ? AND blocker_user_id IN ({author_placeholders})));
+            """,
+            (viewer_user_id, *author_ids, viewer_user_id, *author_ids),
+        ).fetchall()
+        for block in block_rows:
+            blocked_authors.add(
+                block["blocked_user_id"]
+                if block["blocker_user_id"] == viewer_user_id
+                else block["blocker_user_id"]
+            )
+
+    follow_pairs: set[tuple[str, str]] = set()
+    if author_ids:
+        author_placeholders = ", ".join("?" for _ in author_ids)
+        follow_rows = connection.execute(
+            f"""
+            SELECT follower_user_id, following_user_id
+            FROM user_follows
+            WHERE status = 'active'
+              AND ((follower_user_id = ? AND following_user_id IN ({author_placeholders}))
+                OR (following_user_id = ? AND follower_user_id IN ({author_placeholders})));
+            """,
+            (viewer_user_id, *author_ids, viewer_user_id, *author_ids),
+        ).fetchall()
+        follow_pairs = {(item["follower_user_id"], item["following_user_id"]) for item in follow_rows}
+
+    accessible_posts: dict[str, sqlite3.Row] = {}
+    for post_id, post in posts_by_id.items():
+        author_id = post["author_user_id"]
+        viewer_follows_author = (viewer_user_id, author_id) in follow_pairs
+        author_follows_viewer = (author_id, viewer_user_id) in follow_pairs
+        if author_id == viewer_user_id or author_id not in blocked_authors:
+            if post["visibility"] == "public" or author_id == viewer_user_id:
+                accessible_posts[post_id] = post
+            elif post["visibility"] == "followers" and viewer_follows_author:
+                accessible_posts[post_id] = post
+            elif post["visibility"] == "friends" and viewer_follows_author and author_follows_viewer:
+                accessible_posts[post_id] = post
+
+    covers: dict[str, str] = {}
+    if accessible_posts:
+        accessible_placeholders = ", ".join("?" for _ in accessible_posts)
+        cover_rows = connection.execute(
+            f"""
+            SELECT post_media.social_post_id, videos.thumbnail_path
+            FROM post_media
+            JOIN videos ON videos.video_id = post_media.video_id
+            WHERE post_media.social_post_id IN ({accessible_placeholders})
+              AND post_media.deleted_at IS NULL
+              AND videos.deleted_at IS NULL
+              AND videos.thumbnail_path IS NOT NULL
+            ORDER BY post_media.social_post_id ASC, post_media.sort_order ASC, post_media.post_media_id ASC;
+            """,
+            tuple(accessible_posts),
+        ).fetchall()
+        for cover in cover_rows:
+            covers.setdefault(cover["social_post_id"], cover["thumbnail_path"])
+
+    result = dict(unavailable)
+    for post_id, post in accessible_posts.items():
+        result[post_id] = BusinessObjectCard(
+            object_type="social_post",
+            object_id=post_id,
+            state="available",
+            title=(post["title"] or "网球动态")[:120],
+            summary=(post["content"] or "")[:280] or None,
+            cover_url=covers.get(post_id),
+            author=PostShareCardAuthor(
+                user_id=post["author_user_id"],
+                nickname=post["author_nickname"],
+                avatar_path=post["author_avatar_path"],
+            ),
+            metadata={"visibility": post["visibility"]},
+        )
+    return result
+
+
+def hydrate_business_object_card(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    viewer_user_id: str | None,
+) -> BusinessObjectCard | None:
+    """Resolve the minimum current object presentation without trusting persisted message payloads."""
+    if row["status"] != "sent" or not row["target_object_type"] or not row["target_object_id"]:
+        return None
+    object_type = row["target_object_type"]
+    object_id = row["target_object_id"]
+    if object_type not in {"social_post", "video", "tennis_activity", "lesson", "analysis"}:
+        return None
+    if object_type != "social_post":
+        return BusinessObjectCard(
+            object_type=object_type,
+            object_id=object_id,
+            state="unsupported",
+            unavailable_reason="unsupported_object_type",
+        )
+    return _batch_social_post_cards(connection, {object_id}, viewer_user_id).get(object_id)
+
+
+def _legacy_post_share_card(card: BusinessObjectCard | None) -> PostShareCard | None:
+    if card is None or card.object_type != "social_post":
+        return None
+    return PostShareCard(
+        state="available" if card.state == "available" else "unavailable",
+        post_id=card.object_id,
+        reason=None if card.state == "available" else "not_found_or_no_access",
+        title=card.title if card.state == "available" else None,
+        summary=card.summary if card.state == "available" else None,
+        cover_url=card.cover_url if card.state == "available" else None,
+        author=card.author if card.state == "available" else None,
+        visibility=card.metadata.get("visibility") if card.state == "available" else None,
+    )
+
+
 def _select_message(connection: sqlite3.Connection, message_id: str) -> sqlite3.Row:
     row = connection.execute(
         """
@@ -1296,7 +1463,11 @@ def _select_message(connection: sqlite3.Connection, message_id: str) -> sqlite3.
     return row
 
 
-def _message_record(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatMessageRecord:
+def _message_record(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    viewer_user_id: str | None = None,
+) -> ChatMessageRecord:
     sender = None
     if row["sender_user_id"]:
         sender_row = connection.execute(
@@ -1314,10 +1485,11 @@ def _message_record(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatMes
     is_revoked = row["status"] == "revoked"
     attachments = [] if is_revoked else connection.execute(
         """
-        SELECT *
-        FROM chat_message_attachments
-        WHERE message_id = ?
-        ORDER BY sort_order ASC, attachment_id ASC;
+        SELECT a.*, m.upload_status AS media_state, m.thumbnail_storage_key
+        FROM chat_message_attachments AS a
+        LEFT JOIN chat_message_media AS m ON m.media_id = a.media_id
+        WHERE a.message_id = ?
+        ORDER BY a.sort_order ASC, a.attachment_id ASC;
         """,
         (row["message_id"],),
     ).fetchall()
@@ -1348,6 +1520,7 @@ def _message_record(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatMes
                 sender_nickname=reply_sender.nickname if reply_sender else None,
                 text_content=(reply_row["text_content"] or "")[:500] or None,
             )
+    business_object_card = None if is_revoked else hydrate_business_object_card(connection, row, viewer_user_id)
     return ChatMessageRecord(
         message_id=row["message_id"],
         conversation_id=row["conversation_id"],
@@ -1356,13 +1529,15 @@ def _message_record(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatMes
         sender_type=row["sender_type"],
         message_type=row["message_type"],
         text_content=None if is_revoked else row["text_content"],
-        payload_json=None if is_revoked else row["payload_json"],
+        payload_json=None if is_revoked or row["message_type"] == "post_share" else row["payload_json"],
         target_object_type=None if is_revoked else row["target_object_type"],
         target_object_id=None if is_revoked else row["target_object_id"],
         context_object_type=None if is_revoked else row["context_object_type"],
         context_object_id=None if is_revoked else row["context_object_id"],
         reply_to_message_id=row["reply_to_message_id"],
         reply_preview=reply_preview,
+        business_object_card=business_object_card,
+        share_card=_legacy_post_share_card(business_object_card) if row["message_type"] == "post_share" else None,
         client_message_id=row["client_message_id"],
         status=row["status"],
         sent_at=row["sent_at"],
@@ -1370,11 +1545,42 @@ def _message_record(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatMes
         updated_at=row["updated_at"],
         deleted_at=row["deleted_at"],
         sender=sender,
-        attachments=[MessageAttachmentRecord(**_row_dict(item)) for item in attachments],
+        attachments=[_attachment_record(item) for item in attachments],
     )
 
 
-def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[ChatMessageRecord]:
+def _attachment_record(row: sqlite3.Row) -> MessageAttachmentRecord:
+    data = _row_dict(row)
+    media_id = data.get("media_id")
+    media_state = data.get("media_state")
+    thumbnail_exists = False
+    thumbnail_key = data.get("thumbnail_storage_key")
+    if media_id and thumbnail_key:
+        try:
+            thumbnail_exists = storage_path(thumbnail_key).is_file()
+        except (OSError, ValueError):
+            thumbnail_exists = False
+    data["media_url"] = (
+        f"/api/v1/messages/media/{media_id}/content?variant=original"
+        if media_id and media_state in {"uploaded", "attached"}
+        else None
+    )
+    data["thumbnail_url"] = (
+        f"/api/v1/messages/media/{media_id}/content?variant=thumbnail"
+        if media_id and media_state in {"uploaded", "attached"} and thumbnail_exists
+        else None
+    )
+    data["media_state"] = media_state
+    data["media_path"] = None if media_id else data.get("media_path")
+    data["thumbnail_path"] = None if media_id else data.get("thumbnail_path")
+    return MessageAttachmentRecord(**data)
+
+
+def _message_records(
+    connection: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+    viewer_user_id: str | None = None,
+) -> list[ChatMessageRecord]:
     """Hydrate a message page with bounded batch queries while preserving serialization semantics."""
     if not rows:
         return []
@@ -1392,10 +1598,11 @@ def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) ->
         placeholders = ", ".join("?" for _ in message_ids)
         attachment_rows = connection.execute(
             f"""
-            SELECT *
-            FROM chat_message_attachments
-            WHERE message_id IN ({placeholders})
-            ORDER BY message_id ASC, sort_order ASC, attachment_id ASC;
+            SELECT a.*, m.upload_status AS media_state, m.thumbnail_storage_key
+            FROM chat_message_attachments AS a
+            LEFT JOIN chat_message_media AS m ON m.media_id = a.media_id
+            WHERE a.message_id IN ({placeholders})
+            ORDER BY a.message_id ASC, a.sort_order ASC, a.attachment_id ASC;
             """,
             tuple(message_ids),
         ).fetchall()
@@ -1433,6 +1640,15 @@ def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) ->
         ).fetchall()
     users_by_id = {row["user_id"]: _user_summary(row) for row in user_rows}
 
+    post_ids = {
+        row["target_object_id"]
+        for row in rows
+        if row["status"] != "revoked"
+        and row["target_object_type"] == "social_post"
+        and row["target_object_id"]
+    }
+    business_object_cards = _batch_social_post_cards(connection, post_ids, viewer_user_id)
+
     records: list[ChatMessageRecord] = []
     for row in rows:
         is_revoked = row["status"] == "revoked"
@@ -1457,6 +1673,12 @@ def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) ->
                     sender_nickname=reply_sender.nickname if reply_sender else None,
                     text_content=(reply_row["text_content"] or "")[:500] or None,
                 )
+        if is_revoked:
+            business_object_card = None
+        elif row["target_object_type"] == "social_post":
+            business_object_card = business_object_cards.get(row["target_object_id"])
+        else:
+            business_object_card = hydrate_business_object_card(connection, row, viewer_user_id)
         records.append(
             ChatMessageRecord(
                 message_id=row["message_id"],
@@ -1466,13 +1688,15 @@ def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) ->
                 sender_type=row["sender_type"],
                 message_type=row["message_type"],
                 text_content=None if is_revoked else row["text_content"],
-                payload_json=None if is_revoked else row["payload_json"],
+                payload_json=None if is_revoked or row["message_type"] == "post_share" else row["payload_json"],
                 target_object_type=None if is_revoked else row["target_object_type"],
                 target_object_id=None if is_revoked else row["target_object_id"],
                 context_object_type=None if is_revoked else row["context_object_type"],
                 context_object_id=None if is_revoked else row["context_object_id"],
                 reply_to_message_id=reply_id,
                 reply_preview=reply_preview,
+                business_object_card=business_object_card,
+                share_card=_legacy_post_share_card(business_object_card) if row["message_type"] == "post_share" else None,
                 client_message_id=row["client_message_id"],
                 status=row["status"],
                 sent_at=row["sent_at"],
@@ -1482,10 +1706,47 @@ def _message_records(connection: sqlite3.Connection, rows: list[sqlite3.Row]) ->
                 sender=users_by_id.get(row["sender_user_id"]),
                 attachments=[]
                 if is_revoked
-                else [MessageAttachmentRecord(**_row_dict(item)) for item in attachments_by_message.get(row["message_id"], [])],
+                else [_attachment_record(item) for item in attachments_by_message.get(row["message_id"], [])],
             )
         )
     return records
+
+
+def _message_request_matches(
+    connection: sqlite3.Connection,
+    existing: sqlite3.Row,
+    conversation_id: str,
+    payload: MessageCreate,
+) -> bool:
+    if (
+        existing["conversation_id"] != conversation_id
+        or existing["message_type"] != payload.message_type
+        or existing["target_object_type"] != payload.target_object_type
+        or existing["target_object_id"] != payload.target_object_id
+    ):
+        return False
+    if (
+        existing["text_content"] != payload.text_content
+        or existing["payload_json"] != _json_text(payload.payload)
+        or existing["context_object_type"] != payload.context_object_type
+        or existing["context_object_id"] != payload.context_object_id
+        or existing["reply_to_message_id"] != payload.reply_to_message_id
+    ):
+        return False
+    requested_attachments = list(payload.attachments)
+    existing_attachments = connection.execute(
+        "SELECT attachment_type, media_id, mime_type, file_size_bytes, width_px, height_px FROM chat_message_attachments WHERE message_id = ? ORDER BY sort_order ASC, attachment_id ASC;",
+        (existing["message_id"],),
+    ).fetchall()
+    if len(requested_attachments) != len(existing_attachments):
+        return False
+    for requested, actual in zip(requested_attachments, existing_attachments):
+        if requested.attachment_type != actual[0] or requested.media_id != actual[1]:
+            return False
+        for supplied, stored in zip((requested.mime_type, requested.file_size_bytes, requested.width_px, requested.height_px), actual[2:]):
+            if supplied is not None and supplied != stored:
+                return False
+    return True
 
 
 def send_message_in_transaction(
@@ -1526,7 +1787,13 @@ def send_message_in_transaction(
             (user_id, payload.client_message_id),
         ).fetchone()
     if existing is not None:
-        return MessageSendResponse(message=_message_record(connection, existing))
+        if not _message_request_matches(connection, existing, conversation_id, payload):
+            raise_api_error(status.HTTP_409_CONFLICT, "CLIENT_MESSAGE_ID_CONFLICT", "client_message_id is already bound to another message.")
+        existing_event = outbox.event_for_message(connection, existing["message_id"])
+        return MessageSendResponse(
+            message=_message_record(connection, existing, user_id),
+            event_id=existing_event["event_id"] if existing_event is not None else None,
+        )
 
     # Only a real new message restores hidden memberships; idempotent retries return above.
     connection.execute(
@@ -1558,6 +1825,12 @@ def send_message_in_transaction(
                 "The reply target is unavailable.",
             )
 
+    media_ids = [attachment.media_id for attachment in payload.attachments if attachment.media_id]
+    media_rows = []
+    if payload.message_type in {"image", "video"}:
+        media_rows = media_service.validate_media_for_message(connection, user_id, media_ids, expected_type=payload.message_type)
+    elif media_ids:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_MEDIA_TYPE_INVALID", "Message media can only be attached to matching media messages.")
     message_seq = conversation["last_message_seq"] + 1
     message_id = str(uuid.uuid4())
     connection.execute(
@@ -1596,6 +1869,10 @@ def send_message_in_transaction(
         ),
     )
 
+    media_by_id = {
+        row["media_id"]: {key: row[key] for key in row.keys()}
+        for row in media_rows
+    }
     for sort_order, attachment in enumerate(payload.attachments):
         _validate_object_reference(connection, attachment.object_type, attachment.object_id)
         connection.execute(
@@ -1604,6 +1881,7 @@ def send_message_in_transaction(
                 attachment_id,
                 message_id,
                 attachment_type,
+                media_id,
                 media_path,
                 thumbnail_path,
                 mime_type,
@@ -1616,25 +1894,29 @@ def send_message_in_transaction(
                 payload_json,
                 sort_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 str(uuid.uuid4()),
                 message_id,
                 attachment.attachment_type,
+                attachment.media_id,
                 attachment.media_path,
                 attachment.thumbnail_path,
-                attachment.mime_type,
-                attachment.file_size_bytes,
-                attachment.duration_ms,
-                attachment.width_px,
-                attachment.height_px,
+                media_by_id.get(attachment.media_id, {}).get("mime_type", attachment.mime_type),
+                media_by_id.get(attachment.media_id, {}).get("file_size_bytes", attachment.file_size_bytes),
+                media_by_id.get(attachment.media_id, {}).get("duration_ms", attachment.duration_ms),
+                media_by_id.get(attachment.media_id, {}).get("width_px", attachment.width_px),
+                media_by_id.get(attachment.media_id, {}).get("height_px", attachment.height_px),
                 attachment.object_type,
                 attachment.object_id,
                 _json_text(attachment.payload),
                 sort_order,
             ),
         )
+
+    if media_ids:
+        media_service.attach_media_to_message(connection, user_id, message_id, media_ids)
 
     connection.execute(
         """
@@ -1681,7 +1963,12 @@ def send_message_in_transaction(
         )
         _increment_message_counter(connection, recipient["user_id"], conversation["conversation_type"], 1)
 
-    return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id)))
+    persisted_message = _select_message(connection, message_id)
+    event_id = outbox.create_message_event(connection, persisted_message, user_id)
+    return MessageSendResponse(
+        message=_message_record(connection, persisted_message, user_id),
+        event_id=event_id,
+    )
 
 
 def send_message(
@@ -1689,13 +1976,48 @@ def send_message(
     conversation_id: str,
     payload: MessageCreate,
 ) -> MessageSendResponse:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"message:{conversation_id}") as connection:
         return send_message_in_transaction(connection, user_id, conversation_id, payload)
+
+
+def recover_message_by_client_id(
+    user_id: str,
+    conversation_id: str,
+    client_message_id: str,
+) -> Any:
+    """Return the server-authoritative result after a client-side timeout."""
+    normalized = client_message_id.strip()
+    if not normalized:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "CLIENT_MESSAGE_ID_REQUIRED", "client_message_id is required.")
+    with get_connection() as connection:
+        _ensure_active_user(connection, user_id)
+        _select_conversation(connection, conversation_id)
+        _select_member(connection, conversation_id, user_id)
+        row = connection.execute(
+            """
+            SELECT * FROM chat_messages
+            WHERE sender_user_id = ? AND conversation_id = ? AND client_message_id = ?
+            LIMIT 1;
+            """,
+            (user_id, conversation_id, normalized),
+        ).fetchone()
+        if row is None:
+            from backend.app.messages.schemas import MessageRecoveryResponse
+
+            return MessageRecoveryResponse(found=False)
+        event = outbox.event_for_message(connection, row["message_id"])
+        from backend.app.messages.schemas import MessageRecoveryResponse
+
+        return MessageRecoveryResponse(
+            found=True,
+            message=_message_record(connection, row, user_id),
+            event_id=event["event_id"] if event is not None else None,
+        )
 
 
 def recall_message(user_id: str, conversation_id: str, message_id: str) -> MessageSendResponse:
     """Recall one owned Direct text message without changing message ordering or unread state."""
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"message:{conversation_id}") as connection:
         _ensure_active_user(connection, user_id)
         conversation = _select_conversation(connection, conversation_id)
         _select_member(connection, conversation_id, user_id)
@@ -1717,6 +2039,7 @@ def recall_message(user_id: str, conversation_id: str, message_id: str) -> Messa
                 "RECALL_DIRECT_ONLY",
                 "Only Direct text messages can be recalled.",
             )
+
         if row["sender_user_id"] != user_id:
             raise_api_error(
                 status.HTTP_403_FORBIDDEN,
@@ -1755,7 +2078,7 @@ def recall_message(user_id: str, conversation_id: str, message_id: str) -> Messa
                     """,
                     (conversation_id, message_id),
                 )
-        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id)))
+        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id), user_id))
 
 
 def _request_user_summary(connection: sqlite3.Connection, user_id: str) -> MessageUserSummary:
@@ -1850,7 +2173,7 @@ def create_message_request(user_id: str, payload: MessageRequestCreate) -> Messa
     if user_id == target_user_id:
         raise_api_error(status.HTTP_400_BAD_REQUEST, "CANNOT_MESSAGE_SELF", "You cannot message yourself.")
 
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"message-request:{user_id}:{target_user_id}") as connection:
         requester = _ensure_active_user(connection, user_id)
         _ensure_active_user(connection, target_user_id)
         _ensure_not_blocked(connection, user_id, target_user_id)
@@ -2072,7 +2395,7 @@ def list_messages(
         params.append(page_size)
         rows = connection.execute(query, tuple(params)).fetchall()
         ordered_rows = list(reversed(rows))
-        messages = _message_records(connection, ordered_rows)
+        messages = _message_records(connection, ordered_rows, user_id)
         next_before_seq = rows[-1]["message_seq"] if len(rows) == page_size else None
         other_member_last_read_message_seq = None
         direct_interaction_state = None
@@ -2135,7 +2458,7 @@ def reconcile_messages(
             """,
             (conversation_id, *message_ids),
         ).fetchall()
-        items = _message_records(connection, rows)
+        items = _message_records(connection, rows, user_id)
     return MessageReconcileResponse(conversation_id=conversation_id, items=items)
 
 
@@ -2173,7 +2496,7 @@ def search_conversation_messages(
             SELECT *
             FROM chat_messages
             WHERE conversation_id = ?
-              AND message_type = 'text'
+              AND message_type IN ('text', 'post_share')
               AND status = 'sent'
               AND text_content LIKE ? ESCAPE '\\'
               AND deleted_at IS NULL
@@ -2185,7 +2508,7 @@ def search_conversation_messages(
         sql += " ORDER BY message_seq DESC LIMIT ?;"
         params.append(page_size)
         rows = connection.execute(sql, tuple(params)).fetchall()
-        items = _message_records(connection, rows)
+        items = _message_records(connection, rows, user_id)
 
     return ConversationMessageSearchResponse(
         conversation_id=conversation_id,

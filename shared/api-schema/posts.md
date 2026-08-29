@@ -263,9 +263,25 @@ Share request:
   "share_target_type": "conversation",
   "conversation_id": "uuid",
   "message_text": "Take a look at this serve.",
-  "channel": "chat"
+  "channel": "chat",
+  "client_message_id": "device-generated-id"
 }
 ```
+
+`client_message_id` is scoped to the authenticated sender and is required for
+conversation shares. An exact retry returns the original `post_share_id` and
+chat `message_id` without repeating `share_count`, unread, hidden-conversation,
+or message side effects. Reusing the key with a different Post, target type,
+conversation, channel, message text, payload, or object reference returns
+HTTP `409 CLIENT_MESSAGE_ID_CONFLICT` and has no side effects. The key is
+optional for `copy_link` and other non-conversation shares; when supplied, its
+same-field comparison is still enforced. The database unique index protects
+concurrent requests, while the application compares the complete request
+identity before returning a retry.
+
+Post-share idempotency is preserved by the PostgreSQL migration schema and
+the SQLite-to-PostgreSQL transfer tool; no Post upload endpoint is changed by
+the database migration.
 
 ## Update, Delete, Mine, Detail
 

@@ -162,8 +162,15 @@ app.post_detail.comments_panel
 | `app.messages.notification_list` | 通知列表 | list | 系统通知与互动通知 |
 | `app.messages.conversation_list` | 会话列表 | list | 私信和群聊会话 |
 | `app.messages.request_list` | 请求列表 | list | 消息请求列表 |
+| `app.messages.conversation_search_panel` | 会话搜索面板 | panel | 会话关键字搜索、结果与加载更多 |
 | `app.messages.loading_state` | 消息页加载状态 | state | 登录态确认或消息加载中 |
 | `app.messages.error_state` | 消息页错误状态 | state | 某一类消息加载失败 |
+| `app.messages.create_group` | 创建群聊页 | screen | 创建基础群聊并选择成员 |
+| `app.messages.chat_image_picker` | 图片选择器 | component | 聊天页选择单张消息图片 |
+| `app.messages.chat_image_preview` | 图片发送预览区 | panel | 上传前预览、状态和取消操作 |
+| `app.messages.image_message_bubble` | 图片消息气泡 | component | 缩略图、原图加载失败和不可用状态 |
+| `app.messages.chat_video_preview` | 视频发送预览区 | panel | 上传前首帧、时长、可恢复状态和取消操作 |
+| `app.messages.video_message_bubble` | 视频消息气泡 | component | 鉴权缩略图、时长和不可用状态，不提供完整播放器 |
 
 ## 我的页
 
@@ -284,6 +291,11 @@ app.post_detail.comments_panel
 | `app.chat.header` | 会话头部 | section | 头像、会话名、返回区 |
 | `app.chat.message_timeline` | 消息时间线 | list | 历史消息与滚动加载 |
 | `app.chat.composer` | 输入区 | section | 文本输入与发送区 |
+| `app.chat.history_search_panel` | 聊天记录搜索面板 | panel | 会话内关键字搜索、结果与加载更多 |
+| `app.chat.quote_preview` | 引用消息预览 | component | 消息气泡中的回复引用与定位入口 |
+| `app.chat.reply_composer_preview` | 回复编辑预览 | component | 输入区上方的回复目标提示和取消入口 |
+| `app.chat.post_share_card` | 动态分享卡片 | component | 聊天中的 Post 缩略图、摘要、作者与安全跳转入口 |
+| `app.chat.business_object_card` | 业务对象消息卡片 | component | 统一分发可用、不可用和暂不支持的业务对象消息状态 |
 | `app.chat.loading_state` | 聊天加载状态 | state | 会话加载中 |
 
 ## 球友搜索
@@ -312,6 +324,8 @@ app.post_detail.comments_panel
 | `components.pill` | 状态标签 | component | 小状态胶囊标签 |
 | `components.section_header` | 分区标题 | component | 区块标题行 |
 | `components.icon_badge` | 图标徽章 | component | 带底色的图标块 |
+| `chat.video_composer` | 视频消息选择区 | component | 视频选择、上传状态和取消操作 |
+| `chat.video_message_preview` | 视频消息首帧预览 | component | 鉴权缩略图、时长和不可用状态 |
 
 ## 后续补充方式
 

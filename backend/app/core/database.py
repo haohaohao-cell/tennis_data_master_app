@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Iterator
 
 from .config import settings
+from . import postgres
 
 
 AUTH_SCHEMA_SQL = """
@@ -386,6 +387,10 @@ END;
 
 
 def _connect() -> sqlite3.Connection:
+    if settings.uses_postgres:
+        # PostgreSQL connections are owned by the adapter; the return type is
+        # intentionally duck-typed so existing services keep one API.
+        return postgres._open_raw()  # type: ignore[return-value]
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(
         settings.database_path,
@@ -400,6 +405,10 @@ def _connect() -> sqlite3.Connection:
 
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
+    if settings.uses_postgres:
+        with postgres.connection() as connection:
+            yield connection  # type: ignore[misc]
+        return
     connection = _connect()
     try:
         yield connection
@@ -408,7 +417,11 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 
 @contextmanager
-def transaction(*, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+def transaction(*, immediate: bool = False, lock_key: str | None = None) -> Iterator[sqlite3.Connection]:
+    if settings.uses_postgres:
+        with postgres.transaction(immediate=immediate, lock_key=lock_key) as connection:
+            yield connection  # type: ignore[misc]
+        return
     connection = _connect()
     try:
         connection.execute("BEGIN IMMEDIATE;" if immediate else "BEGIN;")
@@ -419,6 +432,12 @@ def transaction(*, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         raise
     finally:
         connection.close()
+
+
+def advisory_lock(connection: sqlite3.Connection, lock_key: str) -> None:
+    """Use PostgreSQL advisory locks when the current transaction supports them."""
+    if settings.uses_postgres:
+        postgres.advisory_lock(connection, lock_key)  # type: ignore[arg-type]
 
 
 def _column_exists(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:
@@ -860,7 +879,245 @@ def _run_post_feed_migrations(connection: sqlite3.Connection) -> None:
     )
 
 
+def _run_post_share_message_migrations(connection: sqlite3.Connection) -> None:
+    """Add the conversation-share idempotency key without rebuilding old SQLite tables."""
+    if not _table_exists(connection, "post_shares"):
+        return
+    if not _column_exists(connection, "post_shares", "client_message_id"):
+        connection.execute(
+            "ALTER TABLE post_shares ADD COLUMN client_message_id TEXT CHECK (client_message_id IS NULL OR length(client_message_id) <= 120);"
+        )
+    if not _column_exists(connection, "post_shares", "message_text"):
+        connection.execute(
+            "ALTER TABLE post_shares ADD COLUMN message_text TEXT CHECK (message_text IS NULL OR length(message_text) <= 500);"
+        )
+    duplicates = connection.execute(
+        """
+        SELECT shared_by_user_id, client_message_id, COUNT(*) AS duplicate_count
+        FROM post_shares
+        WHERE client_message_id IS NOT NULL
+        GROUP BY shared_by_user_id, client_message_id
+        HAVING COUNT(*) > 1
+        LIMIT 1;
+        """
+    ).fetchone()
+    if duplicates is not None:
+        raise RuntimeError(
+            "Cannot create post share idempotency index: existing duplicate client_message_id "
+            "rows require manual reconciliation; no rows were deleted."
+        )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_post_shares_sender_client_message
+            ON post_shares(shared_by_user_id, client_message_id)
+            WHERE client_message_id IS NOT NULL;
+        """
+    )
+
+
+def _run_message_media_migrations(connection: sqlite3.Connection) -> None:
+    """Create the isolated message-image metadata store for existing SQLite databases."""
+    if not _table_exists(connection, "chat_messages"):
+        return
+    existing_definition = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chat_message_media'"
+    ).fetchone()
+    if existing_definition and "media_type = 'image'" in (existing_definition[0] or ""):
+        # SQLite cannot alter a CHECK constraint. Rebuild this one small table,
+        # copying every existing row and leaving the source database contents intact.
+        # Keep other tables' foreign-key SQL pointing at the replacement name.
+        attachment_exists = _table_exists(connection, "chat_message_attachments")
+        if attachment_exists:
+            connection.execute("DROP INDEX IF EXISTS idx_chat_attachments_message_sort;")
+            connection.execute("DROP INDEX IF EXISTS idx_chat_attachments_object;")
+            connection.execute("DROP INDEX IF EXISTS idx_chat_attachments_media_unique;")
+            connection.execute("ALTER TABLE chat_message_attachments RENAME TO chat_message_attachments_stage9_backup;")
+        connection.execute("PRAGMA legacy_alter_table = ON;")
+        connection.execute("ALTER TABLE chat_message_media RENAME TO chat_message_media_stage9_backup;")
+        connection.execute("PRAGMA legacy_alter_table = OFF;")
+        connection.executescript(
+            """
+            CREATE TABLE chat_message_media (
+                media_id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                message_id TEXT,
+                media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+                upload_status TEXT NOT NULL DEFAULT 'created' CHECK (upload_status IN ('created', 'uploading', 'uploaded', 'attached', 'failed', 'expired', 'deleted')),
+                storage_key TEXT NOT NULL,
+                thumbnail_storage_key TEXT,
+                mime_type TEXT NOT NULL CHECK (length(mime_type) <= 100),
+                file_size_bytes INTEGER NOT NULL CHECK (file_size_bytes > 0),
+                width_px INTEGER NOT NULL CHECK (width_px > 0),
+                height_px INTEGER NOT NULL CHECK (height_px > 0),
+                duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms > 0),
+                checksum_sha256 TEXT CHECK (checksum_sha256 IS NULL OR length(checksum_sha256) = 64),
+                expected_checksum_sha256 TEXT CHECK (expected_checksum_sha256 IS NULL OR length(expected_checksum_sha256) = 64),
+                container TEXT CHECK (container IS NULL OR length(container) <= 50),
+                codec TEXT CHECK (codec IS NULL OR length(codec) <= 100),
+                client_upload_id TEXT NOT NULL CHECK (length(client_upload_id) BETWEEN 1 AND 120),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                uploaded_at TEXT, attached_at TEXT, expires_at TEXT NOT NULL, deleted_at TEXT,
+                failure_code TEXT CHECK (failure_code IS NULL OR length(failure_code) <= 80),
+                thumbnail_status TEXT NOT NULL DEFAULT 'pending' CHECK (thumbnail_status IN ('pending', 'generated', 'failed')),
+                thumbnail_failure_code TEXT CHECK (thumbnail_failure_code IS NULL OR length(thumbnail_failure_code) <= 80),
+                storage_deleted_at TEXT,
+                last_cleanup_error TEXT CHECK (last_cleanup_error IS NULL OR length(last_cleanup_error) <= 255),
+                FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE SET NULL,
+                UNIQUE (owner_user_id, client_upload_id)
+            );
+            INSERT INTO chat_message_media (
+                media_id, owner_user_id, message_id, media_type, upload_status, storage_key,
+                thumbnail_storage_key, mime_type, file_size_bytes, width_px, height_px,
+                client_upload_id, created_at, uploaded_at, attached_at, expires_at, deleted_at,
+                failure_code, thumbnail_status, thumbnail_failure_code, storage_deleted_at, last_cleanup_error
+            ) SELECT media_id, owner_user_id, message_id, media_type, upload_status, storage_key,
+                thumbnail_storage_key, mime_type, file_size_bytes, width_px, height_px,
+                client_upload_id, created_at, uploaded_at, attached_at, expires_at, deleted_at,
+                failure_code, COALESCE(thumbnail_status, 'pending'), thumbnail_failure_code,
+                storage_deleted_at, last_cleanup_error
+            FROM chat_message_media_stage9_backup;
+            DROP TABLE chat_message_media_stage9_backup;
+            """
+        )
+        if attachment_exists:
+            connection.executescript(
+                """
+                CREATE TABLE chat_message_attachments (
+                    attachment_id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+                    attachment_type TEXT NOT NULL CHECK (attachment_type IN ('image', 'video', 'audio', 'file', 'object_card', 'data_card', 'link')),
+                    media_path TEXT, media_id TEXT, thumbnail_path TEXT,
+                    mime_type TEXT CHECK (mime_type IS NULL OR length(mime_type) <= 100),
+                    file_size_bytes INTEGER CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0),
+                    duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+                    width_px INTEGER CHECK (width_px IS NULL OR width_px > 0),
+                    height_px INTEGER CHECK (height_px IS NULL OR height_px > 0),
+                    object_type TEXT, object_id TEXT, payload_json TEXT,
+                    sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CHECK ((object_type IS NULL AND object_id IS NULL) OR (object_type IS NOT NULL AND object_id IS NOT NULL)),
+                    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+                    FOREIGN KEY (media_id) REFERENCES chat_message_media(media_id) ON DELETE SET NULL
+                );
+                INSERT INTO chat_message_attachments SELECT * FROM chat_message_attachments_stage9_backup;
+                DROP TABLE chat_message_attachments_stage9_backup;
+                CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_sort ON chat_message_attachments(message_id, sort_order);
+                CREATE INDEX IF NOT EXISTS idx_chat_attachments_object ON chat_message_attachments(object_type, object_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_attachments_media_unique ON chat_message_attachments(media_id) WHERE media_id IS NOT NULL;
+                """
+            )
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS chat_message_media (
+            media_id TEXT PRIMARY KEY,
+            owner_user_id TEXT NOT NULL,
+            message_id TEXT,
+            media_type TEXT NOT NULL CHECK (media_type = 'image'),
+            upload_status TEXT NOT NULL DEFAULT 'created'
+                CHECK (upload_status IN ('created', 'uploading', 'uploaded', 'attached', 'failed', 'expired', 'deleted')),
+            storage_key TEXT NOT NULL,
+            thumbnail_storage_key TEXT,
+            mime_type TEXT NOT NULL CHECK (length(mime_type) <= 100),
+            file_size_bytes INTEGER NOT NULL CHECK (file_size_bytes > 0),
+            width_px INTEGER NOT NULL CHECK (width_px > 0),
+            height_px INTEGER NOT NULL CHECK (height_px > 0),
+            client_upload_id TEXT NOT NULL CHECK (length(client_upload_id) BETWEEN 1 AND 120),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            uploaded_at TEXT,
+            attached_at TEXT,
+            expires_at TEXT NOT NULL,
+            deleted_at TEXT,
+            failure_code TEXT CHECK (failure_code IS NULL OR length(failure_code) <= 80),
+            thumbnail_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (thumbnail_status IN ('pending', 'generated', 'failed')),
+            thumbnail_failure_code TEXT CHECK (thumbnail_failure_code IS NULL OR length(thumbnail_failure_code) <= 80),
+            storage_deleted_at TEXT,
+            last_cleanup_error TEXT CHECK (last_cleanup_error IS NULL OR length(last_cleanup_error) <= 255),
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE SET NULL,
+            UNIQUE (owner_user_id, client_upload_id)
+        );
+        """
+    )
+    if _table_exists(connection, "chat_message_attachments") and not _column_exists(
+        connection, "chat_message_attachments", "media_id"
+    ):
+        connection.execute("ALTER TABLE chat_message_attachments ADD COLUMN media_id TEXT;")
+    for column_name, statement in (
+        ("thumbnail_status", "ALTER TABLE chat_message_media ADD COLUMN thumbnail_status TEXT NOT NULL DEFAULT 'pending' CHECK (thumbnail_status IN ('pending', 'generated', 'failed'));"),
+        ("thumbnail_failure_code", "ALTER TABLE chat_message_media ADD COLUMN thumbnail_failure_code TEXT CHECK (thumbnail_failure_code IS NULL OR length(thumbnail_failure_code) <= 80);"),
+        ("storage_deleted_at", "ALTER TABLE chat_message_media ADD COLUMN storage_deleted_at TEXT;"),
+        ("last_cleanup_error", "ALTER TABLE chat_message_media ADD COLUMN last_cleanup_error TEXT CHECK (last_cleanup_error IS NULL OR length(last_cleanup_error) <= 255);"),
+        ("duration_ms", "ALTER TABLE chat_message_media ADD COLUMN duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms > 0);"),
+        ("checksum_sha256", "ALTER TABLE chat_message_media ADD COLUMN checksum_sha256 TEXT CHECK (checksum_sha256 IS NULL OR length(checksum_sha256) = 64);"),
+        ("expected_checksum_sha256", "ALTER TABLE chat_message_media ADD COLUMN expected_checksum_sha256 TEXT CHECK (expected_checksum_sha256 IS NULL OR length(expected_checksum_sha256) = 64);"),
+        ("container", "ALTER TABLE chat_message_media ADD COLUMN container TEXT;"),
+        ("codec", "ALTER TABLE chat_message_media ADD COLUMN codec TEXT;"),
+    ):
+        if not _column_exists(connection, "chat_message_media", column_name):
+            connection.execute(statement)
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_message_media_owner_status
+            ON chat_message_media(owner_user_id, upload_status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_chat_message_media_type_status_expiry
+            ON chat_message_media(media_type, upload_status, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_chat_message_media_message
+            ON chat_message_media(message_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_message_media_owner_client
+            ON chat_message_media(owner_user_id, client_upload_id);
+        """
+    )
+
+
+def _run_message_outbox_migrations(connection: sqlite3.Connection) -> None:
+    """Add the durable message event log without rewriting existing rows."""
+    if not _table_exists(connection, "chat_messages"):
+        return
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS outbox_events (
+            event_id TEXT PRIMARY KEY,
+            aggregate_type TEXT NOT NULL CHECK (aggregate_type = 'chat_message'),
+            aggregate_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (event_type = 'message.created'),
+            event_version INTEGER NOT NULL DEFAULT 1 CHECK (event_version >= 1),
+            actor_user_id TEXT,
+            conversation_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            message_seq INTEGER NOT NULL CHECK (message_seq >= 1),
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'leased', 'processed', 'failed')),
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            leased_at TEXT,
+            lease_owner TEXT,
+            processed_at TEXT,
+            next_attempt_at TEXT,
+            last_error_code TEXT CHECK (last_error_code IS NULL OR length(last_error_code) <= 80),
+            last_error_message TEXT CHECK (last_error_message IS NULL OR length(last_error_message) <= 500),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (actor_user_id) REFERENCES users(user_id),
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+            FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+            UNIQUE (event_type, message_id, event_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_outbox_events_available
+            ON outbox_events(status, available_at, created_at, event_id);
+        CREATE INDEX IF NOT EXISTS idx_outbox_events_conversation_seq
+            ON outbox_events(conversation_id, message_seq, created_at, event_id);
+        CREATE INDEX IF NOT EXISTS idx_outbox_events_message
+            ON outbox_events(message_id);
+        """
+    )
 def initialize_database() -> None:
+    if settings.uses_postgres:
+        from .postgres_schema import initialize_postgres_schema
+
+        initialize_postgres_schema()
+        return
     schema_sql = settings.schema_path.read_text(encoding="utf-8")
     social_message_schema_path = settings.schema_path.parent / "social_message_schema.sql"
     social_message_schema_sql = social_message_schema_path.read_text(encoding="utf-8")
@@ -872,6 +1129,9 @@ def initialize_database() -> None:
             _run_video_upload_migrations(connection)
             _run_activity_location_migrations(connection)
             _run_post_feed_migrations(connection)
+            _run_post_share_message_migrations(connection)
+            _run_message_media_migrations(connection)
+            _run_message_outbox_migrations(connection)
             connection.executescript(AUTH_SCHEMA_SQL)
         else:
             connection.executescript(schema_sql)
@@ -879,6 +1139,9 @@ def initialize_database() -> None:
             _run_video_upload_migrations(connection)
             _run_activity_location_migrations(connection)
             _run_post_feed_migrations(connection)
+            _run_post_share_message_migrations(connection)
+            _run_message_media_migrations(connection)
+            _run_message_outbox_migrations(connection)
         _repair_stale_tennis_activity_fk_references(connection)
         connection.executescript(social_message_schema_sql)
         connection.executescript(ADMIN_SCHEMA_SQL)

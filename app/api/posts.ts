@@ -349,6 +349,7 @@ export function sharePost(
   accessToken: string,
   socialPostId: string,
   payload: {
+    clientMessageId: string;
     conversationId: string;
     messageText?: string | null;
   },
@@ -357,6 +358,7 @@ export function sharePost(
     accessToken,
     body: {
       conversation_id: payload.conversationId,
+      client_message_id: payload.clientMessageId,
       message_text: payload.messageText ?? null,
       share_target_type: "conversation",
     },

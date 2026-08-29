@@ -35,7 +35,7 @@ for fragment in (
     assert fragment in chat, fragment
 
 assert 'WebSocket' not in api + chat
-assert 'expo-image-picker' not in api + chat
+assert 'app/api/uploads.ts' not in api + chat
 assert chat.count('AppState.addEventListener') == 1
 
 print("Message reply quote static test passed.")

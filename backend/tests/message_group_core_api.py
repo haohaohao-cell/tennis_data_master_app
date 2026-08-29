@@ -115,9 +115,8 @@ async def main() -> None:
         assert first.status == 201
         first_message = first.json_body["message"]
         retry = await send(app, alice, group_id, "different retry body", "group-first")
-        assert retry.status == 201
-        assert retry.json_body["message"]["message_id"] == first_message["message_id"]
-        assert retry.json_body["message"]["message_seq"] == first_message["message_seq"]
+        assert retry.status == 409
+        assert retry.json_body["detail"]["code"] == "CLIENT_MESSAGE_ID_CONFLICT"
 
         with get_connection() as connection:
             same_client_rows = connection.execute(

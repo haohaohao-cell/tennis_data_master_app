@@ -35,6 +35,7 @@ SQLite
   ├─ chat_conversation_members
   ├─ chat_messages
   ├─ chat_message_attachments
+  ├─ chat_message_media
   ├─ chat_message_requests
   ├─ notification_events
   ├─ user_notifications
@@ -89,6 +90,10 @@ SQLite
 
 SQLite 是当前开发和单实例部署的事实存储。所有时间字段使用服务端 UTC；所有业务主键使用 UUID 字符串；消息顺序使用会话内 `message_seq`，不能使用客户端时间排序作为权威顺序。
 
+`backend/db/schema.sql` 是新 SQLite 数据库的完整基线，其中包含
+`user_notification_preferences`。`backend/db/social_message_schema.sql` 是运行时对已有数据库执行的幂等消息升级，保留同一表定义以补齐旧库。执行
+`python scripts/init_sqlite_db.py --db <数据库路径>` 会调用该运行时升级路径；重复执行安全，完成后可用 `PRAGMA foreign_key_check` 验证。
+
 ## 4. 核心领域模型
 
 ### 4.1 会话
@@ -128,6 +133,18 @@ SQLite 是当前开发和单实例部署的事实存储。所有时间字段使�
 ### 4.4 附件
 
 `chat_message_attachments` 保存媒体和对象卡片的展示元数据。消息表只引用业务对象，不把 Post、Activity、Video 或 Lesson 的业务字段复制进来。附件展示前必须再次执行当前用户的对象访问权限检查。
+
+`chat_message_media` 是消息专用图片和视频媒体表，独立维护 owner、上传状态、私有 storage key、缩略图 key、缩略图状态、清理时间/错误、实际 MIME/大小/尺寸、幂等键和过期时间；不与 Post、Activity 或通用视频上传表建立隐式复用。清理默认为 dry-run，只有显式 execute 才会删除消息媒体根目录下的安全候选文件。
+
+消息媒体上传 API 为 `/messages/media/upload-intents`、`/messages/media/{media_id}/file`、`complete`、`cancel`、元数据读取和鉴权内容读取。生命周期为 `created → uploading → uploaded → attached`，异常分支为 `failed`、`expired`、`deleted`。文件传输不在数据库事务内；完成阶段校验真实图片格式和尺寸并生成 JPEG 缩略图，或以 `ffprobe` 校验真实视频流、容器、编解码、尺寸、时长和校验和，再以 `ffmpeg` 生成首帧缩略图。图片仅允许 JPEG、PNG、WebP、GIF，限制 15 MB 和 4,000 万像素；视频仅允许受支持容器，限制 200 MiB、5 分钟和 4,000 万像素；不接受 SVG、音频或任意文件。缩略图失败不改变已校验原图状态，记录 `thumbnail_status` 和失败码。
+
+`client_upload_id` 只负责上传意图幂等，`client_message_id` 只负责消息幂等。上传完成不会创建消息；发送 `image` 或 `video` 消息时服务端重新校验媒体属于当前用户、状态为 `uploaded` 且未绑定，并在同一消息事务中绑定附件、更新会话和未读。App 对视频持久化这两个独立 ID 和可恢复的本地文件元数据；重启后重用它们，并以 `client_message_id` 恢复发送结果，避免重复绑定。媒体绑定后只允许当前 active 会话成员读取，撤回/删除或成员退出后返回不可用；响应永不返回内部 storage key。
+
+`post_share` 使用同一对象引用模型，不复制完整 Post 正文或原始媒体路径。消息响应仅在当前会话成员通过实时 Post 权限检查后提供最小 `share_card`（标题、截断摘要、作者、可见性和可选视频缩略图）；对象被删除、隐藏、未发布、被拉黑或当前不可见时返回不含内容的 `unavailable` 状态。历史、reconcile 和搜索在一页内批量读取 Post、权限关系和封面，避免按消息数增长的 Post hydration 查询；单消息发送仍只读取其自身卡片。数据库和运行时异常必须向上暴露，不能伪装为对象不可用。会话内 Post 分享使用与普通消息相同的会话事务锁，并必须携带 `client_message_id`，以避免网络重试重复写消息、未读数、隐藏会话恢复和 share 计数。本能力不调用 Post 或网球日记上传接口；`video_share` 等后续类型复用对象卡片协议，但本期不实现 UI。
+
+消息响应同时提供通用 `business_object_card` 外壳，作为对象卡片的权威状态来源；它以 `kind`、有限 `object_type`、`object_id`、`state`、最小展示字段、`metadata` 和安全不可用原因为基础。`social_post` 已实现实时权限 hydration；`video`、`tennis_activity`、`lesson` 和 `analysis` 当前返回无内容的 `unsupported`，直到各对象提供消息读取权限适配器。旧 `share_card` 仅为 `post_share` 兼容字段，由同一 hydration 结果派生。
+
+Post 分享幂等键作用域为 `(authenticated_user_id, client_message_id)`。会话分享必须携带非空键；同一键只有在 Post、分享目标类型、会话、channel、message_text、消息类型、对象引用和 payload 全部一致时才是安全重试，服务端返回第一次提交的 share/message 和原始对象引用。任一字段不同返回 HTTP 409 `CLIENT_MESSAGE_ID_CONFLICT`，不返回旧记录或卡片，也不产生消息、未读、隐藏会话恢复、通知或 `share_count` 副作用。数据库部分唯一索引负责并发最终保护，应用层负责完整身份比较。旧 SQLite 升级会添加 nullable 幂等字段；检测到既有重复键时启动明确失败，不删除数据。幂等重试仍按当前 Post 权限 hydration `business_object_card`；冲突响应不包含旧卡片。Post 分享本身不复用 Post 上传接口，也不接入实时或 Push。
 
 ### 4.5 消息请求
 
@@ -251,6 +268,7 @@ PATCH /notifications/preferences
 - 会话列表查询先过滤 active membership 和非隐藏会话，再按 pinned/activity/时间排序。
 - 消息历史按 `conversation_id + message_seq` 索引访问，默认单页不超过 100 条。
 - 附件批量 hydration，避免逐消息查询附件。
+- Post business object 卡片按消息页批量 hydration；发送者、回复和附件也必须保持固定数量查询增长。
 - 搜索优先使用索引；数据规模扩大后迁移 SQLite FTS5 或独立搜索服务。
 
 ### 可靠性
@@ -307,12 +325,38 @@ PATCH /notifications/preferences
 1. FTS5/独立搜索索引和消息定位。
 2. 已发送/已送达/已读、输入状态和在线状态。
 3. 反骚扰、频控、敏感内容审核和批量举报处理。
-4. 当 SQLite 单实例不再满足容量或并发要求时，迁移 PostgreSQL，并将实时事件、Push 和搜索拆为独立基础设施；保持现有 API schema 不变。
+4. PostgreSQL 迁移基础设施已提供；生产配置 DSN 后以 PostgreSQL 为唯一写入权威数据库，实时事件、Push 和搜索仍需作为独立能力建设。
 
 ## 11. 变更原则
 
 - `shared/api-schema/social-messages.md` 是跨端契约的权威文档。
 - 变更字段、枚举或计数语义时，同时更新 backend schemas、App API 类型、测试和本技术框架。
 - 数据库结构变更必须提供可执行迁移脚本，并说明 SQLite 现有数据兼容策略。
+- SQLite 到 PostgreSQL 使用 `scripts/migrate_sqlite_to_postgres.py`，支持只读源、dry-run、分批重跑、冲突报告和导入后校验；原 SQLite 文件保留用于恢复和对比。
+- 消息序号、幂等键、未读计数、会话最后消息和消息媒体绑定继续在事务边界内更新；`chat_message_media` 与 Post/网球日记上传表保持隔离。
 - 新增用户可见页面、面板或弹层时同步更新 `docs/ui/UI_NAMING_REGISTRY.md`。
 - 保持消息表与 Post、Activity、Video、Lesson 等业务表解耦，通过受控引用和读取时权限校验连接业务。
+
+## 12. 消息视频媒体
+
+消息视频沿用 `chat_message_media` 生命周期表和
+`chat_message_attachments` 关系表，不进入 Post、Activity 或业务视频表。
+上传使用流式 SHA-256、`ffprobe` 实际媒体探测和 `ffmpeg` 首帧缩略图；缩略图
+失败不影响已验证原视频。读取时重新执行成员、消息状态、绑定和文件存在性
+检查，API 永不返回 storage key。
+
+## 13. 离线发送与事件基础
+
+本模块提供客户端本地草稿/Outbox、服务端 `outbox_events`、发送恢复查询和
+授权事件游标。客户端本地 `local_id`、`device_id`、重试计数、退避时间和
+错误细节不上传；`client_message_id` 在发送用户作用域内保证幂等。App 重启
+或回前台时把 `sending` 恢复成 `queued`，超时先按 client key 查询权威消息。
+
+服务端在消息、会话预览、未读事实、收件箱缓存、媒体绑定和通知副作用同一
+事务中写入 `message.created` Outbox 事件；事件写入失败则整体回滚。事件游标
+按 `(created_at, event_id)` 排序，多设备分别保存游标；历史消息继续按
+`message_seq` 补偿。领取使用租约字段，PostgreSQL 采用 `FOR UPDATE SKIP LOCKED`
+和事务级锁，SQLite 仅承诺本地写入互斥。当前不接入真实事件消费者。
+
+Push provider、WebSocket/SSE、消息反应、转发、输入状态、在线状态、
+端到端加密和复杂群治理仍未实现。

@@ -27,6 +27,47 @@ Initialize the local SQLite database. The database file is local runtime state a
 python scripts/init_sqlite_db.py
 ```
 
+For PostgreSQL-backed development or production, set `TENNIS_DATABASE_URL`,
+install `backend/requirements.txt`, and initialize the PostgreSQL schema:
+
+```powershell
+$env:TENNIS_DATABASE_HOST = "localhost"
+$env:TENNIS_DATABASE_PORT = "5432"
+$env:TENNIS_DATABASE_NAME = "tennis_messages_test"
+# Set TENNIS_DATABASE_URL in the same PowerShell process without committing it.
+python scripts/inspect_postgres_environment.py
+python scripts/init_postgres_db.py --schema message_<timestamp>
+```
+
+For the Expo app, install the locked dependencies and run the strict TypeScript
+check with the local compiler:
+
+```powershell
+Set-Location app
+npm ci
+& .\node_modules\.bin\tsc.cmd --noEmit
+```
+
+The current repository has three unrelated pre-existing type errors in
+`app/app/(tabs)/profile.tsx`; they must be fixed before claiming a full-project
+typecheck pass. Message-module static tests remain runnable independently.
+
+PostgreSQL is the only production write authority. SQLite is retained for
+legacy-data reads, migration input, and lightweight tests. See
+`docs/database/POSTGRES_MIGRATION.md` for the non-destructive transfer and
+validation commands.
+
+Message video operations require `ffprobe.exe` and `ffmpeg.exe` on PATH (or
+`TENNIS_FFPROBE_PATH`/`TENNIS_FFMPEG_PATH`). See
+`docs/messages/MESSAGE_MEDIA_VIDEO_OPERATIONS.md` and
+`docs/database/LOCAL_POSTGRES_MESSAGE_SETUP.md` for isolated database and
+media cleanup procedures.
+
+For migration consistency checks, always pass an explicit isolated schema such
+as `--schema message_<timestamp>`. `scripts/reconcile_inbox_counters.py` is
+read-only by default; its `--execute` mode updates only users present in the
+read-only SQLite source and records destination before/after values.
+
 Optional local admin account for the admin Web:
 
 ```powershell
@@ -102,3 +143,8 @@ docker-compose.yml
 .gitignore
 README.md
 ```
+
+Message history, search, reconcile, and Post card hydration are bounded per
+page. Keep SQLite and PostgreSQL validation or performance reports in local,
+ignored paths; they are environment-specific evidence rather than repository
+artifacts.

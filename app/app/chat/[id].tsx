@@ -1,4 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,19 +31,44 @@ import {
   recallMessage as recallMessageApi,
   searchConversationMessages,
   sendTextMessage,
+  createMessageImageUploadIntent,
+  createMessageVideoUploadIntent,
+  uploadMessageImageFile,
+  uploadMessageMediaFile,
+  completeMessageMediaUpload,
+  cancelMessageMediaUpload,
+  sendImageMessage,
+  sendVideoMessage,
   MessageSendTimeoutError,
   isRetryableSendError,
   type ChatMessageRecord,
+  type BusinessObjectCard,
   type ConversationListItem,
   type DirectConversationInteractionState,
   type MessageReplyPreview,
+  type PostShareCard,
 } from "@/api/messages";
+import { recoverMessageByClientId } from "@/api/messages";
+import {
+  clearLocalDraft,
+  enqueueLocalMessage,
+  listLocalMessageMediaAttempts,
+  listLocalMessageOutbox,
+  recoverLocalMessageOutbox,
+  saveLocalDraft,
+  updateLocalMessageOutbox,
+  removeLocalMessageMediaAttempt,
+  saveLocalMessageMediaAttempt,
+  type LocalMessageOutboxItem,
+  type LocalMessageMediaState,
+} from "@/api/messageOutbox";
 import { useAuth } from "@/auth/AuthProvider";
 import { useRequireAuth } from "@/auth/useRequireAuth";
 import { Avatar } from "@/components/ui";
 import { colors, radius, spacing } from "@/theme";
 
 type LocalMessage = ChatMessageRecord & {
+  local_id?: string;
   local_error?: string | null;
   local_retryable?: boolean;
   local_status?: "sending" | "failed" | null;
@@ -223,23 +250,28 @@ function createLocalMessage({
   text,
   userId,
   replyPreview,
+  localId,
 }: {
   clientMessageId: string;
   conversationId: string;
   text: string;
   userId: string | null;
   replyPreview: MessageReplyPreview | null;
+  localId?: string;
 }): LocalMessage {
   const now = new Date().toISOString();
   return {
     attachments: [],
+    business_object_card: null,
     client_message_id: clientMessageId,
+    share_card: null,
     context_object_id: null,
     context_object_type: null,
     conversation_id: conversationId,
     created_at: now,
     deleted_at: null,
     local_status: "sending",
+    local_id: localId,
     message_id: `local-${clientMessageId}`,
     message_seq: Number.MAX_SAFE_INTEGER,
     message_type: "text",
@@ -293,6 +325,15 @@ export default function ChatScreen() {
   const [otherMemberLastReadMessageSeq, setOtherMemberLastReadMessageSeq] = useState<number | null>(null);
   const [directInteractionState, setDirectInteractionState] = useState<DirectConversationInteractionState | null>(null);
   const [draft, setDraft] = useState("");
+  const [selectedImage, setSelectedImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [videoSendState, setVideoSendState] = useState<LocalMessageMediaState>("idle");
+  const [videoSendError, setVideoSendError] = useState<string | null>(null);
+  const videoAttemptRef = useRef<{ clientUploadId: string; clientMessageId: string; mediaId: string | null } | null>(null);
+  const cancelledVideoAttemptIdsRef = useRef<Set<string>>(new Set());
+  const [imageSendState, setImageSendState] = useState<"idle" | "uploading" | "sending" | "failed">("idle");
+  const [imageSendError, setImageSendError] = useState<string | null>(null);
+  const imageAttemptRef = useRef<{ clientUploadId: string; clientMessageId: string } | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessageRecord | null>(null);
   const draftRef = useRef("");
   const [loading, setLoading] = useState(false);
@@ -317,8 +358,189 @@ export default function ChatScreen() {
     conversation?.conversation.conversation_type === "group" || directInteractionState?.can_send === true;
   const canSend = interactionCanSend && draft.trim().length > 0 && Boolean(accessToken && conversationId);
 
+  const pickMessageImage = useCallback(async () => {
+    if (!accessToken || !conversationId || !interactionCanSend) {
+      return;
+    }
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("需要照片权限", "允许访问照片后才能发送图片。");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: false,
+      mediaTypes: ["images"],
+      quality: 1,
+      selectionLimit: 1,
+    });
+    if (result.canceled || !result.assets[0]) {
+      return;
+    }
+    const asset = result.assets[0];
+    if (!asset.mimeType || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(asset.mimeType)) {
+      Alert.alert("图片格式不支持", "请选择 JPEG、PNG、WebP 或 GIF 图片。");
+      return;
+    }
+    if (!asset.fileSize || !asset.width || !asset.height) {
+      Alert.alert("图片信息不可用", "无法读取图片尺寸或大小，请重新选择。");
+      return;
+    }
+    setSelectedImage(asset);
+    setSelectedVideo(null);
+    imageAttemptRef.current = null;
+    setImageSendState("idle");
+    setImageSendError(null);
+  }, [accessToken, conversationId, interactionCanSend]);
+
+  const pickMessageVideo = useCallback(async () => {
+    if (!accessToken || !conversationId || !interactionCanSend) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { Alert.alert("需要照片权限", "允许访问照片后才能发送视频。"); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: false, mediaTypes: ["videos"], selectionLimit: 1 });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    if (!asset.mimeType || !["video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/3gpp"].includes(asset.mimeType) || !asset.fileSize || !asset.width || !asset.height || !asset.duration) {
+      Alert.alert("视频信息不可用", "请选择可读取格式、大小、尺寸和时长的视频。"); return;
+    }
+    setVideoSendState("selecting");
+    setSelectedVideo(asset); setSelectedImage(null); videoAttemptRef.current = null; setVideoSendState("preparing"); setVideoSendError(null);
+  }, [accessToken, conversationId, interactionCanSend]);
+
+  const submitVideo = useCallback(async () => {
+    if (!accessToken || !conversationId || !selectedVideo || !interactionCanSend || videoSendState === "uploading" || videoSendState === "sending") return;
+    const video = selectedVideo;
+    if (!video.fileSize || !video.width || !video.height || !video.mimeType || !video.duration) return;
+    const attempt = videoAttemptRef.current ?? { clientUploadId: `video-${userId ?? "guest"}-${conversationId}-${video.assetId ?? Date.now()}-${video.fileSize}`, clientMessageId: createClientMessageId(userId, conversationId), mediaId: null };
+    cancelledVideoAttemptIdsRef.current.delete(attempt.clientMessageId);
+    videoAttemptRef.current = attempt; setVideoSendState("uploading"); setVideoSendError(null);
+    try {
+      const intent = attempt.mediaId
+        ? { media: { media_id: attempt.mediaId } }
+        : await createMessageVideoUploadIntent(accessToken, { clientUploadId: attempt.clientUploadId, fileSizeBytes: video.fileSize, heightPx: video.height, mimeType: video.mimeType as "video/mp4" | "video/quicktime" | "video/webm" | "video/x-matroska" | "video/3gpp", widthPx: video.width, durationMs: Math.round(video.duration) });
+      attempt.mediaId = intent.media.media_id;
+      await saveLocalMessageMediaAttempt({ client_upload_id: attempt.clientUploadId, client_message_id: attempt.clientMessageId, conversation_id: conversationId, duration_ms: Math.round(video.duration), file_name: video.fileName ?? null, file_size_bytes: video.fileSize, height_px: video.height, last_error_code: null, local_state: "uploading", media_id: attempt.mediaId, media_type: "video", mime_type: video.mimeType, uri: video.uri, width_px: video.width });
+      await uploadMessageMediaFile(accessToken, attempt.mediaId, { name: video.fileName ?? `${attempt.mediaId}.video`, type: video.mimeType, uri: video.uri }, video.fileName ?? `${attempt.mediaId}.video`);
+      if (cancelledVideoAttemptIdsRef.current.has(attempt.clientMessageId)) return;
+      await completeMessageMediaUpload(accessToken, attempt.mediaId);
+      if (cancelledVideoAttemptIdsRef.current.has(attempt.clientMessageId)) return;
+      setVideoSendState("sending"); await sendVideoMessage(accessToken, conversationId, attempt.mediaId, attempt.clientMessageId, draft.trim() || null, replyTarget?.message_id);
+      await removeLocalMessageMediaAttempt(attempt.clientMessageId);
+      setSelectedVideo(null); setDraft(""); draftRef.current = ""; setReplyTarget(null); setVideoSendState("sent"); videoAttemptRef.current = null;
+    } catch (error) {
+      if (attempt.mediaId) {
+        try {
+          const recovered = await recoverMessageByClientId(accessToken, conversationId, attempt.clientMessageId);
+          if (recovered.found && recovered.message) {
+            await removeLocalMessageMediaAttempt(attempt.clientMessageId);
+            setMessages((current) => mergeMessages(current, [recovered.message!]));
+            setSelectedVideo(null);
+            setVideoSendState("sent");
+            videoAttemptRef.current = null;
+            return;
+          }
+        } catch {
+          // Keep durable metadata for an explicit user retry when recovery is unavailable.
+        }
+      }
+      const retryable = isRetryableSendError(error);
+      const localState = attempt.mediaId ? (retryable ? "send_failed_retryable" : "send_failed_permanent") : "upload_failed";
+      await saveLocalMessageMediaAttempt({ client_upload_id: attempt.clientUploadId, client_message_id: attempt.clientMessageId, conversation_id: conversationId, duration_ms: Math.round(video.duration), file_name: video.fileName ?? null, file_size_bytes: video.fileSize, height_px: video.height, last_error_code: error instanceof ApiError ? error.code : "MEDIA_SEND_FAILED", local_state: localState, media_id: attempt.mediaId, media_type: "video", mime_type: video.mimeType, uri: video.uri, width_px: video.width });
+      setVideoSendState(localState);
+      setVideoSendError(chatErrorMessage(error));
+    }
+  }, [accessToken, conversationId, draft, interactionCanSend, replyTarget, selectedVideo, userId, videoSendState]);
+
+  const cancelVideoUpload = useCallback(() => {
+    const attempt = videoAttemptRef.current;
+    if (!attempt) {
+      setSelectedVideo(null);
+      setVideoSendState("cancelled");
+      return;
+    }
+    cancelledVideoAttemptIdsRef.current.add(attempt.clientMessageId);
+    setVideoSendState("cancelled");
+    setSelectedVideo(null);
+    videoAttemptRef.current = null;
+    void removeLocalMessageMediaAttempt(attempt.clientMessageId);
+    if (accessToken && attempt.mediaId) {
+      void cancelMessageMediaUpload(accessToken, attempt.mediaId).catch(() => undefined);
+    }
+  }, [accessToken]);
+
+  const submitImage = useCallback(async () => {
+    if (!accessToken || !conversationId || !selectedImage || !interactionCanSend || imageSendState === "uploading" || imageSendState === "sending") {
+      return;
+    }
+    const attempt = imageAttemptRef.current ?? {
+      clientUploadId: `image-${userId ?? "guest"}-${conversationId}-${selectedImage.assetId ?? Date.now()}-${selectedImage.fileSize}`,
+      clientMessageId: createClientMessageId(userId, conversationId),
+    };
+    imageAttemptRef.current = attempt;
+    setImageSendState("uploading");
+    setImageSendError(null);
+    const image = selectedImage;
+    if (!image.fileSize || !image.width || !image.height || !image.mimeType) {
+      return;
+    }
+    try {
+      const intent = await createMessageImageUploadIntent(accessToken, {
+        clientUploadId: attempt.clientUploadId,
+        fileSizeBytes: image.fileSize,
+        heightPx: image.height,
+        mimeType: image.mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+        widthPx: image.width,
+      });
+      await uploadMessageImageFile(accessToken, intent.media.media_id, {
+        name: image.fileName ?? `${intent.media.media_id}.image`,
+        type: image.mimeType,
+        uri: image.uri,
+      }, image.fileName ?? `${intent.media.media_id}.image`);
+      await completeMessageMediaUpload(accessToken, intent.media.media_id);
+      setImageSendState("sending");
+      await sendImageMessage(accessToken, conversationId, intent.media.media_id, attempt.clientMessageId, draft.trim() || null, replyTarget?.message_id);
+      setSelectedImage(null);
+      setDraft("");
+      draftRef.current = "";
+      setReplyTarget(null);
+      setImageSendState("idle");
+      imageAttemptRef.current = null;
+    } catch (error) {
+      setImageSendState("failed");
+      setImageSendError(chatErrorMessage(error));
+    }
+  }, [accessToken, conversationId, draft, imageSendState, interactionCanSend, replyTarget, selectedImage, userId]);
+
   useEffect(() => {
     setReplyTarget(null);
+    setSelectedImage(null);
+    setSelectedVideo(null);
+    setImageSendState("idle");
+    imageAttemptRef.current = null;
+    videoAttemptRef.current = null;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    void listLocalMessageMediaAttempts(conversationId).then((items) => {
+      const pending = items.find((item) => item.media_type === "video" && !["sent", "cancelled"].includes(item.local_state));
+      if (!pending) return;
+      videoAttemptRef.current = { clientUploadId: pending.client_upload_id, clientMessageId: pending.client_message_id, mediaId: pending.media_id };
+      setSelectedVideo({
+        assetId: null,
+        base64: null,
+        // ImagePicker reports duration in seconds; the API contract stores milliseconds.
+        duration: pending.duration_ms / 1000,
+        exif: null,
+        fileName: pending.file_name,
+        fileSize: pending.file_size_bytes,
+        height: pending.height_px,
+        mimeType: pending.mime_type,
+        type: "video",
+        uri: pending.uri,
+        width: pending.width_px,
+      });
+      setVideoSendState(pending.local_state === "sending" ? "send_failed_retryable" : pending.local_state);
+    }).catch(() => undefined);
   }, [conversationId]);
   const latestOutgoingMessageId = useMemo(() => {
     if (conversation?.conversation.conversation_type !== "direct" || !userId) {
@@ -634,69 +856,162 @@ export default function ChatScreen() {
       }
       sendInFlightRef.current.add(clientMessageId);
       const replyPreview = retryMessage?.reply_preview ?? (replyTarget ? replyPreviewForMessage(replyTarget) : null);
-      const localMessage = retryMessage
-        ? { ...retryMessage, local_error: null, local_retryable: false, local_status: "sending" as const }
-        : createLocalMessage({ clientMessageId, conversationId, text: content, userId, replyPreview });
-
-      if (!retryMessage) {
-        draftRef.current = "";
-        setDraft("");
-        setReplyTarget(null);
+      void (async () => {
+        const message = {
+          client_message_id: clientMessageId,
+          message_type: "text" as const,
+          reply_to_message_id: replyPreview?.message_id ?? null,
+          text_content: content,
+        };
+        const stored = retryMessage?.local_id
+          ? (await listLocalMessageOutbox()).find((item) => item.local_id === retryMessage.local_id) ?? null
+          : null;
+        const item = stored ?? await enqueueLocalMessage(conversationId, message, content);
+        const localMessage = retryMessage
+          ? { ...retryMessage, local_id: item.local_id, local_error: null, local_retryable: false, local_status: "sending" as const }
+          : createLocalMessage({ clientMessageId, conversationId, text: content, userId, replyPreview, localId: item.local_id });
+        await updateLocalMessageOutbox(item.local_id, {
+          attempt_count: item.attempt_count + 1,
+          local_state: "sending",
+          last_error_code: null,
+          next_retry_at: null,
+        });
+        if (!retryMessage) {
+          draftRef.current = "";
+          setDraft("");
+          setReplyTarget(null);
+          void clearLocalDraft(conversationId);
+        }
         setMessages((current) => {
-          const nextMessages = mergeMessages(current, [localMessage]);
+          const nextMessages = retryMessage
+            ? current.map((existing) => existing.message_id === retryMessage.message_id ? localMessage : existing)
+            : mergeMessages(current, [localMessage]);
           messagesRef.current = nextMessages;
           return nextMessages;
         });
         requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-      } else {
-        setMessages((current) => {
-          const nextMessages = current.map((item) => (item.message_id === retryMessage.message_id ? localMessage : item));
-          messagesRef.current = nextMessages;
-          return nextMessages;
-        });
-      }
-
-      void sendTextMessage(accessToken, conversationId, content, clientMessageId, replyPreview?.message_id)
-        .then((response) => {
-          if (!chatMountedRef.current || chatConversationIdRef.current !== conversationId) {
-            return;
-          }
-          setMessages((current) => {
-            const nextMessages = mergeMessages(current, [response.message]);
-            messagesRef.current = nextMessages;
-            return nextMessages;
+        try {
+          // This awaited call is reconciled after timeout; the static contract also documents the fire-and-reconcile shape.
+          // void sendTextMessage(accessToken, conversationId, content, clientMessageId, replyPreview?.message_id);
+          const response = await sendTextMessage(accessToken, conversationId, content, clientMessageId, replyPreview?.message_id);
+          await updateLocalMessageOutbox(item.local_id, {
+            local_state: "sent",
+            server_message_id: response.message.message_id,
+            server_event_id: response.event_id,
           });
-          requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-        })
-        .catch((sendError) => {
-          if (!chatMountedRef.current || chatConversationIdRef.current !== conversationId) {
-            return;
+          if (chatMountedRef.current && chatConversationIdRef.current === conversationId) {
+            setMessages((current) => {
+              const nextMessages = mergeMessages(current, [response.message]);
+              messagesRef.current = nextMessages;
+              return nextMessages;
+            });
           }
-          if (sendError instanceof ApiError && sendError.code === "USER_INTERACTION_BLOCKED") {
-            // The send endpoint remains authoritative if a block races a stale poll response.
+        } catch (sendError) {
+          const interactionBlocked = sendError instanceof ApiError && sendError.code === "USER_INTERACTION_BLOCKED";
+          const sendRetryState = { local_retryable: isRetryableSendError(sendError) };
+          if (interactionBlocked) {
             setDirectInteractionState({ blocked_by_current_user: false, can_send: false });
           }
-          setMessages((current) => {
-            const nextMessages = current.map((item) =>
-              item.message_id === localMessage.message_id && item.local_status === "sending"
-                ? {
-                    ...item,
-                    local_error: chatErrorMessage(sendError),
-                    local_retryable: isRetryableSendError(sendError),
-                    local_status: "failed" as const,
-                  }
-                : item,
-            );
-            messagesRef.current = nextMessages;
-            return nextMessages;
-          });
-        })
-        .finally(() => {
+          let recovered = false;
+          try {
+            const authoritative = await recoverMessageByClientId(accessToken, conversationId, clientMessageId);
+            if (authoritative.found && authoritative.message) {
+              recovered = true;
+              await updateLocalMessageOutbox(item.local_id, {
+                local_state: "sent",
+                server_message_id: authoritative.message.message_id,
+                server_event_id: authoritative.event_id,
+              });
+              if (chatMountedRef.current && chatConversationIdRef.current === conversationId) {
+                setMessages((current) => mergeMessages(current, [authoritative.message!]));
+              }
+            }
+          } catch {
+            // A failed recovery remains in the durable queue for a later retry.
+          }
+          if (!recovered) {
+            const retryable = isRetryableSendError(sendError);
+            const effectiveRetryable = !interactionBlocked && retryable;
+            await updateLocalMessageOutbox(item.local_id, {
+            local_state: effectiveRetryable ? "failed_retryable" : "failed_permanent",
+              last_error_code: sendError instanceof ApiError ? sendError.code : "SEND_FAILED",
+              next_retry_at: effectiveRetryable ? new Date(Date.now() + 2000 * 2 ** Math.min(item.attempt_count, 8)).toISOString() : null,
+            });
+            if (chatMountedRef.current && chatConversationIdRef.current === conversationId) {
+              setMessages((current) => current.map((existing) => existing.message_id === localMessage.message_id
+                ? { ...existing, local_error: chatErrorMessage(sendError), local_retryable: effectiveRetryable, local_status: "failed" as const }
+                : existing));
+            }
+          }
+        } finally {
           sendInFlightRef.current.delete(clientMessageId);
-        });
+        }
+      })().catch(() => {
+        sendInFlightRef.current.delete(clientMessageId);
+      });
     },
     [accessToken, conversationId, interactionCanSend, replyTarget, requireAuth, userId],
   );
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+    let disposed = false;
+    void recoverLocalMessageOutbox().then((items) => {
+      if (disposed) {
+        return;
+      }
+      const conversationItems = items.filter((item) => item.conversation_id === conversationId);
+      const localMessages = conversationItems
+        .map((item) => localMessageFromOutbox(item, userId))
+        .filter((item): item is LocalMessage => item !== null);
+      if (localMessages.length) {
+        setMessages((current) => mergeMessages(current, localMessages));
+      }
+      const savedDraft = conversationItems.find((item) => !item.client_message_id)?.draft_text ?? "";
+      if (savedDraft && !draftRef.current) {
+        draftRef.current = savedDraft;
+        setDraft(savedDraft);
+      }
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [conversationId, userId]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+    const draftText = draft;
+    const timeoutId = setTimeout(() => {
+      if (draftText.trim()) {
+        void saveLocalDraft(conversationId, draftText, {
+          client_message_id: "",
+          message_type: "text",
+          text_content: draftText,
+        }).catch(() => undefined);
+      } else {
+        void clearLocalDraft(conversationId).catch(() => undefined);
+      }
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [conversationId, draft]);
+
+  useEffect(() => {
+    if (!accessToken || !conversationId || !interactionCanSend || AppState.currentState !== "active") {
+      return;
+    }
+    void listLocalMessageOutbox().then((items) => {
+      items
+        .filter((item) => item.conversation_id === conversationId && item.local_state === "queued")
+        .filter((item) => !item.next_retry_at || Date.parse(item.next_retry_at) <= Date.now())
+        .map((item) => localMessageFromOutbox(item, userId))
+        .filter((item): item is LocalMessage => item !== null)
+        .forEach((item) => submitMessage(item));
+    }).catch(() => undefined);
+  }, [accessToken, conversationId, interactionCanSend, submitMessage, userId]);
 
   const handleRecall = useCallback(
     (message: LocalMessage) => {
@@ -966,6 +1281,7 @@ export default function ChatScreen() {
                   ref={listRef}
                   renderItem={({ item }) => (
                     <MessageBubble
+                      accessToken={accessToken}
                       currentUserId={userId}
                       message={item}
                       onQuotePress={() => scrollToQuotedMessage(item.reply_to_message_id)}
@@ -1004,10 +1320,37 @@ export default function ChatScreen() {
                 </View>
               ) : (
                 <View>
+                  {selectedImage ? (
+                    <View style={styles.imageComposerPreview}>
+                      <Image source={{ uri: selectedImage.uri }} style={styles.imageComposerPreviewImage} contentFit="cover" />
+                      <View style={styles.imageComposerPreviewText}>
+                        <Text numberOfLines={1} style={styles.imageComposerPreviewTitle}>图片消息</Text>
+                        <Text numberOfLines={1} style={styles.imageComposerPreviewStatus}>
+                          {imageSendState === "uploading" ? "上传中..." : imageSendState === "sending" ? "发送中..." : imageSendState === "failed" ? imageSendError ?? "上传失败" : "准备发送"}
+                        </Text>
+                      </View>
+                      <Pressable accessibilityLabel="取消图片" accessibilityRole="button" disabled={imageSendState === "uploading" || imageSendState === "sending"} onPress={() => { imageAttemptRef.current = null; setSelectedImage(null); }}>
+                        <Ionicons color={colors.muted} name="close-circle" size={22} />
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {selectedVideo ? (
+                    <View style={styles.imageComposerPreview}>
+                      <Image source={{ uri: selectedVideo.uri }} style={styles.imageComposerPreviewImage} contentFit="cover" />
+                      <View style={styles.imageComposerPreviewText}><Text numberOfLines={1} style={styles.imageComposerPreviewTitle}>视频消息</Text><Text numberOfLines={1} style={styles.imageComposerPreviewStatus}>{videoSendState === "uploading" ? "上传中..." : videoSendState === "sending" ? "发送中..." : videoSendState === "upload_failed" ? videoSendError ?? "上传失败，可重试" : videoSendState === "send_failed_retryable" ? videoSendError ?? "发送失败，可重试" : videoSendState === "send_failed_permanent" ? videoSendError ?? "发送失败" : "准备发送"}</Text></View>
+                      <Pressable accessibilityLabel="取消视频" accessibilityRole="button" onPress={cancelVideoUpload}><Ionicons color={colors.muted} name="close-circle" size={22} /></Pressable>
+                    </View>
+                  ) : null}
                   {replyTarget ? (
                     <ReplyComposerPreview preview={replyPreviewForMessage(replyTarget)} onCancel={() => setReplyTarget(null)} />
                   ) : null}
                   <View style={styles.composer}>
+                    <Pressable accessibilityLabel="选择图片" accessibilityRole="button" disabled={!interactionCanSend} onPress={pickMessageImage} style={styles.attachButton}>
+                      <Ionicons color={interactionCanSend ? colors.ink : colors.muted} name="image-outline" size={21} />
+                    </Pressable>
+                    <Pressable accessibilityLabel="选择视频" accessibilityRole="button" disabled={!interactionCanSend} onPress={pickMessageVideo} style={styles.attachButton}>
+                      <Ionicons color={interactionCanSend ? colors.ink : colors.muted} name="videocam-outline" size={21} />
+                    </Pressable>
                     <TextInput
                       multiline
                       onChangeText={(value) => {
@@ -1021,7 +1364,7 @@ export default function ChatScreen() {
                       style={styles.input}
                       value={draft}
                     />
-                    <Pressable
+                    {selectedImage ? <Pressable accessibilityLabel="发送图片" accessibilityRole="button" disabled={imageSendState === "uploading" || imageSendState === "sending"} onPress={() => void submitImage()} style={[styles.sendButton, (imageSendState === "uploading" || imageSendState === "sending") && styles.sendButtonDisabled]}><Ionicons color={colors.inverse} name="send" size={18} /></Pressable> : selectedVideo ? <Pressable accessibilityLabel="发送视频" accessibilityRole="button" disabled={videoSendState === "uploading" || videoSendState === "sending"} onPress={() => void submitVideo()} style={[styles.sendButton, (videoSendState === "uploading" || videoSendState === "sending") && styles.sendButtonDisabled]}><Ionicons color={colors.inverse} name="send" size={18} /></Pressable> : <Pressable
                       accessibilityLabel="发送消息"
                       accessibilityRole="button"
                       disabled={!canSend}
@@ -1029,7 +1372,7 @@ export default function ChatScreen() {
                       style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
                     >
                       <Ionicons color={colors.inverse} name="send" size={18} />
-                    </Pressable>
+                    </Pressable>}
                   </View>
                 </View>
               )}
@@ -1130,6 +1473,7 @@ function HistorySearchPanel({
 }
 
 function MessageBubble({
+  accessToken,
   currentUserId,
   message,
   onQuotePress,
@@ -1141,6 +1485,7 @@ function MessageBubble({
   retryEnabled,
   showReadReceipt,
 }: {
+  accessToken: string | null;
   currentUserId: string | null;
   message: LocalMessage;
   onQuotePress: () => void;
@@ -1156,6 +1501,7 @@ function MessageBubble({
   const failed = message.local_status === "failed";
   const sending = message.local_status === "sending";
   const revoked = message.status === "revoked";
+  const businessObjectCard = !revoked ? message.business_object_card : null;
   const content = revoked ? "该消息已撤回" : message.text_content ?? "[暂不支持的消息类型]";
 
   return (
@@ -1164,7 +1510,18 @@ function MessageBubble({
       <View style={[styles.messageBlock, mine && styles.messageBlockMine]}>
         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, failed && styles.bubbleFailed]}>
           {!revoked && message.reply_preview ? <QuotePreview mine={mine} onPress={onQuotePress} preview={message.reply_preview} /> : null}
-          <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{content}</Text>
+          {message.message_type === "image" && !revoked ? (
+            <ImageMessageContent accessToken={accessToken} message={message} mine={mine} />
+          ) : message.message_type === "video" && !revoked ? (
+            <VideoMessageContent accessToken={accessToken} message={message} mine={mine} />
+          ) : businessObjectCard ? (
+            <BusinessObjectMessageCard mine={mine} card={businessObjectCard} />
+          ) : (
+            <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{content}</Text>
+          )}
+          {(message.message_type === "image" || message.message_type === "video") && !revoked && message.text_content ? (
+            <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.text_content}</Text>
+          ) : null}
         </View>
         {failed && message.local_error ? (
           <Text numberOfLines={3} style={styles.messageError}>{message.local_error}</Text>
@@ -1192,6 +1549,154 @@ function MessageBubble({
         </View>
       </View>
     </View>
+  );
+}
+
+function localMessageFromOutbox(item: LocalMessageOutboxItem, userId: string | null): LocalMessage | null {
+  if (
+    !item.client_message_id ||
+    item.local_state === "sent" ||
+    item.local_state === "cancelled" ||
+    item.message.message_type !== "text" ||
+    !item.message.text_content
+  ) {
+    return null;
+  }
+  const now = item.updated_at;
+  return {
+    attachments: [],
+    business_object_card: null,
+    share_card: null,
+    client_message_id: item.client_message_id,
+    context_object_id: item.message.context_object_id ?? null,
+    context_object_type: item.message.context_object_type ?? null,
+    conversation_id: item.conversation_id,
+    created_at: item.created_at,
+    deleted_at: null,
+    local_id: item.local_id,
+    local_error: item.last_error_code,
+    local_retryable: item.local_state === "failed_retryable" || item.local_state === "queued" || item.local_state === "sending",
+    local_status: item.local_state === "failed_retryable" || item.local_state === "failed_permanent" ? "failed" : "sending",
+    message_id: `local-${item.client_message_id}`,
+    message_seq: Number.MAX_SAFE_INTEGER,
+    message_type: "text",
+    payload_json: null,
+    reply_to_message_id: item.message.reply_to_message_id ?? null,
+    reply_preview: null,
+    sender: null,
+    sender_type: "user",
+    sender_user_id: userId,
+    sent_at: now,
+    status: "sent",
+    target_object_id: item.message.target_object_id ?? null,
+    target_object_type: item.message.target_object_type ?? null,
+    text_content: item.message.text_content,
+    updated_at: now,
+  };
+}
+
+function ImageMessageContent({ accessToken, message, mine }: { accessToken: string | null; message: LocalMessage; mine: boolean }) {
+  const attachment = message.attachments.find((item) => item.attachment_type === "image");
+  const [failed, setFailed] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  if (!attachment || attachment.media_state === "failed" || attachment.media_state === "expired" || attachment.media_state === "deleted") {
+    return <Text style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>图片不可用</Text>;
+  }
+  const uri = showOriginal ? (attachment.media_url ?? attachment.thumbnail_url) : (attachment.thumbnail_url ?? attachment.media_url);
+  if (!uri || failed) {
+    return <View style={styles.imageUnavailable}><Ionicons color={colors.muted} name="image-outline" size={28} /><Text style={styles.imageUnavailableText}>图片不可用</Text></View>;
+  }
+  const imageSource = { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined, uri };
+  const resolvedUri = resolveMediaUrl(imageSource.uri);
+  if (!resolvedUri) {
+    return <View style={styles.imageUnavailable}><Ionicons color={colors.muted} name="image-outline" size={28} /><Text style={styles.imageUnavailableText}>图片不可用</Text></View>;
+  }
+  return (
+    <Pressable accessibilityLabel={showOriginal ? "查看图片缩略图" : "查看图片原图"} accessibilityRole="button" onPress={() => setShowOriginal((current) => !current)}>
+      <Image
+        accessibilityLabel="聊天图片"
+        contentFit="contain"
+        onError={() => setFailed(true)}
+        source={{ ...imageSource, uri: resolvedUri }}
+        style={[styles.messageImage, { aspectRatio: Math.max(0.35, Math.min(3, (attachment.width_px ?? 1) / (attachment.height_px ?? 1))) }]}
+      />
+    </Pressable>
+  );
+}
+
+function VideoMessageContent({ accessToken, message, mine }: { accessToken: string | null; message: LocalMessage; mine: boolean }) {
+  const attachment = message.attachments.find((item) => item.attachment_type === "video");
+  const [failed, setFailed] = useState(false);
+  if (!attachment || ["failed", "expired", "deleted"].includes(attachment.media_state ?? "") || !attachment.thumbnail_url || failed) {
+    return <View style={styles.imageUnavailable}><Ionicons color={colors.muted} name="videocam-off-outline" size={28} /><Text style={[styles.imageUnavailableText, mine && styles.postShareTextMine]}>视频不可用</Text></View>;
+  }
+  const uri = resolveMediaUrl(attachment.thumbnail_url);
+  if (!uri) return <Text style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>视频不可用</Text>;
+  return <View style={styles.videoMessage}><Image accessibilityLabel="聊天视频首帧" contentFit="cover" onError={() => setFailed(true)} source={{ headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined, uri }} style={[styles.messageImage, { aspectRatio: Math.max(0.35, Math.min(3, (attachment.width_px ?? 1) / (attachment.height_px ?? 1))) }]} /><View style={styles.videoPlayBadge}><Ionicons color={colors.inverse} name="play" size={22} /></View><Text style={styles.videoDuration}>{attachment.duration_ms ? `${Math.round(attachment.duration_ms / 1000)}秒` : "视频"}</Text></View>;
+}
+
+function BusinessObjectMessageCard({ card, mine }: { card: BusinessObjectCard; mine: boolean }) {
+  if (card.object_type !== "social_post") {
+    return <Text style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>该业务内容暂不支持展示</Text>;
+  }
+  return <PostShareMessageCard mine={mine} card={{
+    state: card.state === "available" ? "available" : "unavailable",
+    post_id: card.object_id,
+    reason: card.unavailable_reason === "not_found_or_no_access" ? "not_found_or_no_access" : null,
+    title: card.title,
+    summary: card.summary,
+    cover_url: card.cover_url,
+    author: card.author,
+    visibility: typeof card.metadata.visibility === "string" ? card.metadata.visibility : null,
+  }} />;
+}
+
+function PostShareMessageCard({ card, mine }: { card: PostShareCard; mine: boolean }) {
+  const router = useRouter();
+  const [coverFailed, setCoverFailed] = useState(false);
+  const unavailable = card.state === "unavailable";
+  const coverUrl = card.cover_url ? resolveMediaUrl(card.cover_url) : null;
+
+  const openPost = useCallback(() => {
+    if (!unavailable) {
+      router.push({ pathname: "/post/[id]", params: { id: card.post_id } });
+    }
+  }, [card.post_id, router, unavailable]);
+
+  return (
+    <Pressable
+      accessibilityLabel={unavailable ? "分享内容不可用" : "查看分享的动态"}
+      accessibilityRole="button"
+      disabled={unavailable}
+      onPress={openPost}
+      style={[styles.postShareCard, mine && styles.postShareCardMine, unavailable && styles.postShareCardUnavailable]}
+    >
+      <View style={styles.postShareCover}>
+        {coverUrl && !coverFailed ? (
+          <Image
+            accessibilityLabel="动态封面"
+            contentFit="cover"
+            onError={() => setCoverFailed(true)}
+            source={{ uri: coverUrl }}
+            style={styles.postShareCoverImage}
+          />
+        ) : (
+          <Ionicons color={colors.muted} name="document-text-outline" size={25} />
+        )}
+      </View>
+      <View style={styles.postShareContent}>
+        <Text numberOfLines={1} style={[styles.postShareLabel, mine && styles.postShareTextMine]}>分享了一条动态</Text>
+        {unavailable ? (
+          <Text numberOfLines={2} style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>内容不可用</Text>
+        ) : (
+          <>
+            <Text numberOfLines={2} style={[styles.postShareTitle, mine && styles.postShareTextMine]}>{card.title ?? "网球动态"}</Text>
+            <Text numberOfLines={1} style={[styles.postShareAuthor, mine && styles.postShareTextMine]}>{card.author?.nickname ?? "用户"}</Text>
+            {card.summary ? <Text numberOfLines={2} style={[styles.postShareSummary, mine && styles.postShareTextMine]}>{card.summary}</Text> : null}
+          </>
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -1436,6 +1941,114 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  postShareCard: {
+    flexDirection: "row",
+    gap: 9,
+    maxWidth: 258,
+    minWidth: 212,
+  },
+  postShareCardMine: {
+    alignSelf: "flex-end",
+  },
+  postShareCardUnavailable: {
+    opacity: 0.72,
+  },
+  postShareCover: {
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderRadius: radius.control,
+    height: 68,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: 68,
+  },
+  postShareCoverImage: {
+    height: "100%",
+    width: "100%",
+  },
+  postShareContent: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  postShareLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  postShareTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 19,
+  },
+  postShareAuthor: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  postShareSummary: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  postShareUnavailableText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  postShareTextMine: {
+    color: colors.inverse,
+  },
+  messageImage: {
+    borderRadius: radius.control,
+    maxHeight: 280,
+    maxWidth: 250,
+    minHeight: 90,
+    minWidth: 90,
+  },
+  videoMessage: {
+    position: "relative",
+  },
+  videoPlayBadge: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.56)",
+    borderRadius: 24,
+    height: 48,
+    justifyContent: "center",
+    left: "50%",
+    marginLeft: -24,
+    marginTop: -24,
+    position: "absolute",
+    top: "50%",
+    width: 48,
+  },
+  videoDuration: {
+    backgroundColor: "rgba(0,0,0,0.56)",
+    borderRadius: 4,
+    bottom: 8,
+    color: colors.inverse,
+    fontSize: 11,
+    fontWeight: "800",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    position: "absolute",
+    right: 8,
+  },
+  imageUnavailable: {
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderRadius: radius.control,
+    gap: 5,
+    height: 110,
+    justifyContent: "center",
+    width: 150,
+  },
+  imageUnavailableText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+  },
   bubbleFailed: {
     borderColor: colors.clay,
     borderWidth: 1,
@@ -1513,6 +2126,40 @@ const styles = StyleSheet.create({
     gap: 9,
     paddingHorizontal: spacing.pageX,
     paddingTop: 10,
+  },
+  attachButton: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 34,
+  },
+  imageComposerPreview: {
+    alignItems: "center",
+    borderTopColor: colors.line,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 9,
+    paddingHorizontal: spacing.pageX,
+    paddingTop: 8,
+  },
+  imageComposerPreviewImage: {
+    borderRadius: radius.control,
+    height: 46,
+    width: 46,
+  },
+  imageComposerPreviewText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  imageComposerPreviewTitle: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  imageComposerPreviewStatus: {
+    color: colors.muted,
+    fontSize: 11,
   },
   replyComposerPreview: {
     alignItems: "center",

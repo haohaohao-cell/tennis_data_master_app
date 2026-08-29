@@ -208,3 +208,32 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     throw parseResponseError;
   }
 }
+
+export async function apiUpload<T>(
+  path: string,
+  accessToken: string,
+  file: Blob | { uri: string; name: string; type: string },
+  filename = "image",
+): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const form = new FormData();
+  form.append("file", file as Blob, filename);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      body: form,
+      headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
+      method: "POST",
+    });
+  } catch (error) {
+    throw new ApiError(0, "NETWORK_ERROR", error instanceof Error ? error.message : "Network request failed.", {
+      method: "POST",
+      path,
+      url,
+    });
+  }
+  if (!response.ok) {
+    throw await parseError(response, { method: "POST", path, url });
+  }
+  return (await response.json()) as T;
+}

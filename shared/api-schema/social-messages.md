@@ -100,6 +100,56 @@ DELETE /messages/conversations/{conversation_id}/hide
 GET /messages/unread-counts
 ```
 
+### Message media
+
+```text
+POST /messages/media/upload-intents
+POST /messages/media/{media_id}/file       (multipart field: file)
+POST /messages/media/{media_id}/complete
+POST /messages/media/{media_id}/cancel
+GET  /messages/media/{media_id}
+GET  /messages/media/{media_id}/content?variant=thumbnail|original
+```
+
+Message media is isolated from Post and tennis-activity uploads. The
+`chat_message_media` table owns the upload lifecycle and verified media
+metadata; `chat_message_attachments` only records the one-to-one binding from
+a committed `image` or `video` message to its media record. The upload intent
+accepts `image/jpeg`, `image/png`, `image/webp`, `image/gif`, `video/mp4`,
+`video/quicktime`, `video/webm`, `video/x-matroska`, or `video/3gpp`, positive
+dimensions, a bounded file size, and a user-scoped
+`client_upload_id`. The server generates `media_id` and the private storage
+key; clients cannot submit a storage path, bucket, or permanent URL. Upload
+and message idempotency keys are independent: retrying an identical intent
+returns the same media, while retrying an identical message returns the same
+message. Changing intent metadata returns `409 CLIENT_UPLOAD_ID_CONFLICT`.
+
+Media progresses through `created`, `uploading`, `uploaded`, `attached`,
+`failed`, `expired`, and `deleted`. File transfer is outside the message
+database transaction. Completion validates actual image content and generates
+a bounded JPEG thumbnail for images; for videos it validates the real stream,
+container, codec, dimensions, duration, and checksum with `ffprobe`, then
+generates a first-frame JPEG thumbnail with `ffmpeg`. Thumbnail failure
+preserves the validated original and reports `thumbnail_status = failed`. It
+does not create a message. Only an uploaded, unbound media record may be
+attached to one matching `image` or `video` message; binding the message and
+attachment occurs in the same transaction. Media messages may also contain
+bounded text and use the normal `client_message_id` retry semantics.
+
+Unbound media is readable only by its owner. Attached media requires an active
+member of the message's conversation and a non-revoked message. Content URLs
+are authenticated API routes and never expose `storage_key`; expired, failed,
+deleted, missing, or unauthorized media return stable unavailable errors.
+Video uploads are limited to 200 MiB, five minutes, and 40 million pixels by
+default; image uploads are limited to 15 MiB and 40 million pixels. Audio and
+generic file uploads are not supported. Message media does not use any Post,
+tennis-diary, or `app/api/uploads.ts` upload flow.
+
+Media responses expose `thumbnail_status` (`pending`, `generated`, or `failed`),
+`thumbnail_failure_code`, `storage_deleted_at`, and `last_cleanup_error`.
+The cleanup command is dry-run by default; only `--execute` removes safe
+candidates under the isolated message-media storage root.
+
 Conversation Pin is a per-user membership preference backed by
 `chat_conversation_members.pinned_at`. `POST .../pin` sets the authenticated
 active member's timestamp only when it is currently null; an idempotent retry
@@ -430,3 +480,129 @@ The `data` member is itself a bounded union. Direct Message data contains only `
 Logical delivery identities reuse persisted IDs: `direct_message:<message_id>`, `message_request:<request_id>`, and `notification_event:<notification_event_id>`. A Notification Event normalized as a Message Request delegates to the Message Request contract, preserving the same request delivery identity. Future deduplication scopes `delivery_id` together with `recipient_user_id`; these identities enable that integration but do not implement provider-level dedup storage or retries.
 
 Direct Message and Message Request display bodies intentionally omit their private text. Display metadata and routing data remain separate so shared infrastructure can later apply the confirmed lock-screen preview policy. Lesson events carry their mapped `course` preference but currently resolve to `unsupported` when enabled because the App has no actionable Lesson detail route. Unmapped `mention`, `video_shared`, `coach_application_reviewed`, `system_announcement`, and `custom` events use `eligible_without_preference_mapping` without changing their in-app records.
+
+### Business object cards
+
+`business_object_card` is the additive, authoritative message object-card
+protocol. Its finite `object_type` values are `social_post`, `video`,
+`tennis_activity`, `lesson`, and `analysis`; finite `state` values are
+`available`, `unavailable`, and `unsupported`. It always includes
+`kind = "business_object"`, `object_type`, `object_id`, minimal display fields,
+`metadata`, and `unavailable_reason`. `unavailable` is used for objects that
+cannot be read now; `unsupported` means this client/server version has no
+resolver for that object type and contains no object content.
+
+### Post share cards
+
+`post_share` messages targeting `social_post` return `share_card` from send,
+history, reconcile, and conversation-message search. Their `payload_json` is
+always `null`; the internal `post_share_id` is not a client display contract.
+
+```json
+{
+  "share_card": {
+    "state": "available",
+    "post_id": "post-id",
+    "title": "Post title",
+    "summary": "Short summary",
+    "cover_url": "/storage/videos/thumbnail.jpg",
+    "author": {"user_id": "user-id", "nickname": "Author", "avatar_path": null},
+    "visibility": "public",
+    "reason": null
+  }
+}
+```
+
+The server rechecks current Post access for the authenticated active member on
+every hydration. Deleted, hidden, unpublished, blocked, or inaccessible Posts
+return `state = "unavailable"`, the `post_id`,
+`reason = "not_found_or_no_access"`, and null optional content fields. Clients
+must not show cached title, summary, author, or cover data for this state.
+`cover_url`, when present, is a generated video thumbnail, never original Post
+media. Conversation shares require `client_message_id`; retries return the
+original share and message without another message, unread increment, hidden
+conversation restoration, or `share_count` increment. Other share types may
+reuse this protocol later, but only `post_share` cards are implemented now.
+
+The idempotency scope is `(authenticated_user_id, client_message_id)`. A
+conversation share must provide a non-empty key; non-conversation shares may
+omit it. When a key is present, the server compares the Post, target type,
+conversation, channel, message text, message/object references, and payload.
+An identical request returns the original records. Reusing the key with any
+different value returns HTTP `409` with code `CLIENT_MESSAGE_ID_CONFLICT`,
+without returning the old records or creating any message, share, unread,
+notification, hidden-conversation restoration, or `share_count` side effect.
+The database partial unique index is the final concurrent-write guard; the
+application comparison preserves request identity before returning a retry.
+Older SQLite databases are upgraded by adding nullable columns and the index.
+If duplicate non-null keys already exist, startup fails with an explicit
+reconciliation error and does not delete data.
+
+For compatibility, `share_card` remains available only for `post_share` and is
+derived from the same `business_object_card` hydration result. New clients must
+use `business_object_card`; the legacy field will remain until supported mobile
+versions have migrated. A repeated `client_message_id` must bind the same
+sender, conversation, message/share type, and target object; otherwise the API
+returns `409 CLIENT_MESSAGE_ID_CONFLICT` with no new message, unread count, or
+share-count side effect.
+
+The idempotency behavior applies equally to the `business_object_card` returned
+by a retry: it is hydrated from the original object reference under current
+Post permissions, while conflict responses do not include the previous card.
+Post sharing does not implement or reuse Post or tennis-diary upload APIs.
+
+## PostgreSQL runtime compatibility
+
+The API contract is unchanged when the backend uses PostgreSQL. String IDs,
+timestamp response formats, message sequence numbers, idempotency conflict
+codes, unread counts, object-card availability states, and message-media
+authorization remain compatible with the SQLite baseline. PostgreSQL is the
+production write authority when `TENNIS_DATABASE_URL` is configured; SQLite is
+retained only for legacy migration input and lightweight tests.
+
+## Query boundary
+
+History, message search, and reconcile preserve `conversation_id` plus
+`message_seq` cursor semantics. Their Post `business_object_card` hydration is
+page-bounded: Post rows, access relationships, and cover media are loaded in
+batch, while unsupported object types remain `unsupported` and database
+failures are not converted to `unavailable`. SQLite performance evidence is
+reported separately from PostgreSQL evidence.
+
+## Offline send and durable events
+
+The mobile client keeps drafts and pending sends in a versioned local store.
+Draft text, local attachment references, local IDs, device IDs, retry metadata,
+and local error details never enter the server message payload. Local states
+are `queued`, `sending`, `sent`, `failed_retryable`, `failed_permanent`, and
+`cancelled`. On app start or foreground recovery, `sending` becomes `queued`.
+
+`client_message_id` is idempotent within the authenticated sender scope;
+`message_id` is the server-authoritative message identity; `event_id` is the
+durable event identity; and `device_id` identifies a local queue only. Retries
+with the same request identity return the original message and event without
+new unread, notification, or event side effects. Changed input under the same
+client key returns `409 CLIENT_MESSAGE_ID_CONFLICT`.
+
+The server writes one `message.created` row to `outbox_events` in the same
+transaction as the message, conversation preview, unread facts, inbox cache,
+media binding, and notifications. Event insertion failure rolls back the full
+message transaction. `GET /messages/conversations/{conversation_id}/events`
+is an authorized read-only replay endpoint with an opaque `(created_at,
+event_id)` cursor. The client-id recovery endpoint recovers the authoritative
+message after a client timeout. Network/408/425/429/5xx errors are retryable;
+auth, permission, validation, conflict, and expired-media errors are permanent.
+
+Future consumers may claim events with `leased_at`, `lease_owner`,
+`attempt_count`, and `next_attempt_at`; PostgreSQL uses `FOR UPDATE SKIP LOCKED`
+and SQLite provides only local single-writer serialization. Acknowledgement is
+lease-owner scoped and processing must be idempotent by `event_id`. This does
+not implement Push, WebSocket, or SSE delivery.
+
+## Message video media
+
+Message media intents accept `image` or `video`. Video records expose validated
+MIME, byte size, dimensions, duration, checksum, container, and codec metadata,
+while storage keys remain server-only. Video messages use a `video` attachment
+and return authorized original/thumbnail URLs. Upload and message idempotency
+remain separate through `client_upload_id` and `client_message_id`.

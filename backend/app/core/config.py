@@ -45,6 +45,34 @@ class Settings:
         )
     )
     public_avatar_path_prefix: str = os.getenv("TENNIS_AVATAR_PUBLIC_PATH_PREFIX", "/storage/avatars")
+    message_media_storage_dir: Path = Path(
+        os.getenv(
+            "TENNIS_MESSAGE_MEDIA_STORAGE_DIR",
+            str(ROOT_DIR / "backend" / "storage" / "message_media"),
+        )
+    )
+    # PostgreSQL is the production authority when a DSN is configured. SQLite
+    # remains available for local legacy-data reads and lightweight tests.
+    database_url: str | None = os.getenv("TENNIS_DATABASE_URL") or os.getenv("TENNIS_POSTGRES_DSN")
+    database_pool_min_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MIN_SIZE", "1"))
+    database_pool_max_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MAX_SIZE", "10"))
+    database_connect_timeout_seconds: float = float(os.getenv("TENNIS_DATABASE_CONNECT_TIMEOUT_SECONDS", "5"))
+    database_transaction_timeout_seconds: int = int(os.getenv("TENNIS_DATABASE_TRANSACTION_TIMEOUT_SECONDS", "30000"))
+    max_message_image_size_bytes: int = int(
+        os.getenv("TENNIS_MAX_MESSAGE_IMAGE_SIZE_BYTES", str(15 * 1024 * 1024))
+    )
+    max_message_image_pixels: int = int(
+        os.getenv("TENNIS_MAX_MESSAGE_IMAGE_PIXELS", str(40_000_000))
+    )
+    max_message_video_size_bytes: int = int(
+        os.getenv("TENNIS_MAX_MESSAGE_VIDEO_SIZE_BYTES", str(200 * 1024 * 1024))
+    )
+    max_message_video_pixels: int = int(os.getenv("TENNIS_MAX_MESSAGE_VIDEO_PIXELS", str(40_000_000)))
+    max_message_video_duration_ms: int = int(os.getenv("TENNIS_MAX_MESSAGE_VIDEO_DURATION_MS", str(5 * 60 * 1000)))
+    ffprobe_path: str | None = os.getenv("TENNIS_FFPROBE_PATH")
+    ffmpeg_path: str | None = os.getenv("TENNIS_FFMPEG_PATH")
+    video_probe_timeout_seconds: int = int(os.getenv("TENNIS_VIDEO_PROBE_TIMEOUT_SECONDS", "30"))
+    message_media_ttl_hours: int = int(os.getenv("TENNIS_MESSAGE_MEDIA_TTL_HOURS", "24"))
     max_upload_avatar_size_bytes: int = int(
         os.getenv("TENNIS_MAX_UPLOAD_AVATAR_SIZE_BYTES", str(5 * 1024 * 1024))
     )
@@ -72,6 +100,10 @@ class Settings:
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in {"dev", "development", "local"}
+
+    @property
+    def uses_postgres(self) -> bool:
+        return bool(self.database_url)
 
 
 settings = Settings()

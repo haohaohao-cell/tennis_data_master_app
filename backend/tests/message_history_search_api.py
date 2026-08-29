@@ -77,7 +77,9 @@ async def main() -> None:
         page_four = await send(app, alice_headers, conversation_id, "page needle four", "search-8")
         deleted = await send(app, alice_headers, conversation_id, "deleted serve", "search-deleted")
         await send(app, alice_headers, other_conversation_id, "serve in another conversation", "search-other")
-        await send(app, alice_headers, conversation_id, "payload serve", "search-image", message_type="image")
+        # Image messages now require a completed message-media attachment;
+        # image-specific behavior is covered by message_image_message_api.py.
+        await send(app, alice_headers, conversation_id, "payload-only", "search-payload")
         with get_connection() as connection:
             connection.execute("UPDATE chat_messages SET deleted_at = CURRENT_TIMESTAMP WHERE message_id = ?;", (deleted["message_id"],))
             connection.commit()

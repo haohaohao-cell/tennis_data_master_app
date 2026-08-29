@@ -50,7 +50,7 @@ for fragment in (
 
 assert chat.count("AppState.addEventListener") == 1
 assert "WebSocket" not in api + chat
-assert "expo-image-picker" not in api + chat
+assert "app/api/uploads.ts" not in api + chat
 assert "setInterval" in chat
 assert chat.count("setInterval(() =>") == 1
 

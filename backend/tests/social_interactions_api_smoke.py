@@ -253,6 +253,7 @@ async def main() -> None:
                 "share_target_type": "conversation",
                 "conversation_id": conversation_id,
                 "message_text": "Look at this serve note.",
+                "client_message_id": "social-interactions-post-share-1",
                 "channel": "chat",
             },
             headers=bob_headers,

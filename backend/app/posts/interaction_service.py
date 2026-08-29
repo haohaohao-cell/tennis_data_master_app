@@ -237,6 +237,56 @@ def _share_record(row: sqlite3.Row) -> PostShareRecord:
     return PostShareRecord(**_row_dict(row))
 
 
+def _share_payloads_equal(stored_payload_json: str | None, requested_payload: dict[str, Any] | None) -> bool:
+    """Compare payload values rather than JSON key ordering for idempotency."""
+    try:
+        stored = json.loads(stored_payload_json) if stored_payload_json is not None else None
+    except (TypeError, ValueError):
+        return False
+    return stored == requested_payload
+
+
+def _share_request_matches(
+    connection: sqlite3.Connection,
+    existing: sqlite3.Row,
+    *,
+    social_post_id: str,
+    payload: PostShareCreate,
+) -> bool:
+    if (
+        existing["social_post_id"] != social_post_id
+        or existing["share_target_type"] != payload.share_target_type
+        or existing["conversation_id"] != payload.conversation_id
+        or existing["channel"] != payload.channel
+        or existing["message_text"] != payload.message_text
+        or not _share_payloads_equal(existing["payload_json"], payload.payload)
+    ):
+        return False
+    if payload.share_target_type != "conversation":
+        return True
+    if not existing["message_id"]:
+        return False
+    message = connection.execute(
+        """
+        SELECT message_type, conversation_id, text_content,
+               target_object_type, target_object_id, payload_json
+        FROM chat_messages
+        WHERE message_id = ?
+        LIMIT 1;
+        """,
+        (existing["message_id"],),
+    ).fetchone()
+    if message is None:
+        return False
+    return (
+        message["message_type"] == "post_share"
+        and message["conversation_id"] == payload.conversation_id
+        and message["text_content"] == payload.message_text
+        and message["target_object_type"] == "social_post"
+        and message["target_object_id"] == social_post_id
+    )
+
+
 def like_post(
     user_id: str,
     social_post_id: str,
@@ -610,64 +660,132 @@ def delete_comment(user_id: str, social_post_id: str, comment_id: str) -> PostCo
 
 
 def share_post(user_id: str, social_post_id: str, payload: PostShareCreate) -> PostShareResponse:
-    with transaction() as connection:
-        _ensure_active_user(connection, user_id)
-        _select_accessible_post(connection, social_post_id, user_id)
-        post_share_id = str(uuid.uuid4())
-        connection.execute(
-            """
-            INSERT INTO post_shares (
-                post_share_id,
-                social_post_id,
-                shared_by_user_id,
-                share_target_type,
-                conversation_id,
-                channel,
-                payload_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                post_share_id,
-                social_post_id,
-                user_id,
-                payload.share_target_type,
-                payload.conversation_id,
-                payload.channel,
-                _json_text(payload.payload),
-            ),
+    try:
+        lock_key = (
+            f"message:{payload.conversation_id}"
+            if payload.share_target_type == "conversation" and payload.conversation_id
+            else f"post-share:{user_id}:{payload.client_message_id or social_post_id}"
         )
-
-        if payload.share_target_type == "conversation":
-            sent = message_service.send_message_in_transaction(
-                connection,
-                user_id,
-                payload.conversation_id or "",
-                MessageCreate(
-                    message_type="post_share",
-                    text_content=payload.message_text,
-                    payload={"post_share_id": post_share_id},
-                    target_object_type="social_post",
-                    target_object_id=social_post_id,
-                ),
-            )
+        with transaction(
+            immediate=True,
+            lock_key=lock_key,
+        ) as connection:
+            _ensure_active_user(connection, user_id)
+            _select_accessible_post(connection, social_post_id, user_id)
+            if payload.client_message_id:
+                existing = connection.execute(
+                    """
+                    SELECT *
+                    FROM post_shares
+                    WHERE shared_by_user_id = ?
+                      AND client_message_id = ?
+                    LIMIT 1;
+                    """,
+                    (user_id, payload.client_message_id),
+                ).fetchone()
+                if existing is not None:
+                    if not _share_request_matches(
+                        connection,
+                        existing,
+                        social_post_id=social_post_id,
+                        payload=payload,
+                    ):
+                        raise_api_error(
+                            status.HTTP_409_CONFLICT,
+                            "CLIENT_MESSAGE_ID_CONFLICT",
+                            "client_message_id is already bound to another share.",
+                        )
+                    return PostShareResponse(
+                        success=True,
+                        share=_share_record(existing),
+                        stats=_stats_record(connection, social_post_id),
+                    )
+            if payload.client_message_id:
+                existing_message = connection.execute(
+                    """
+                    SELECT message_id
+                    FROM chat_messages
+                    WHERE sender_user_id = ? AND client_message_id = ?
+                    LIMIT 1;
+                    """,
+                    (user_id, payload.client_message_id),
+                ).fetchone()
+                if existing_message is not None:
+                    raise_api_error(
+                        status.HTTP_409_CONFLICT,
+                        "CLIENT_MESSAGE_ID_CONFLICT",
+                        "client_message_id is already bound to another message.",
+                    )
+            post_share_id = str(uuid.uuid4())
+            # Keep the optional share text for complete idempotency comparison;
+            # it is internal metadata and is not exposed as a card field.
             connection.execute(
                 """
-                UPDATE post_shares
-                SET message_id = ?
-                WHERE post_share_id = ?;
+                INSERT INTO post_shares (
+                    post_share_id,
+                    social_post_id,
+                    shared_by_user_id,
+                    share_target_type,
+                    conversation_id,
+                    channel,
+                    message_text,
+                    client_message_id,
+                    payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (sent.message.message_id, post_share_id),
+                (
+                    post_share_id,
+                    social_post_id,
+                    user_id,
+                    payload.share_target_type,
+                    payload.conversation_id,
+                    payload.channel,
+                    payload.message_text,
+                    payload.client_message_id,
+                    _json_text(payload.payload),
+                ),
             )
 
-        stats = _update_stat_count(connection, social_post_id, "share_count", 1)
-        row = connection.execute(
-            """
-            SELECT *
-            FROM post_shares
-            WHERE post_share_id = ?
-            LIMIT 1;
-            """,
-            (post_share_id,),
-        ).fetchone()
-    return PostShareResponse(success=True, share=_share_record(row), stats=stats)
+            if payload.share_target_type == "conversation":
+                sent = message_service.send_message_in_transaction(
+                    connection,
+                    user_id,
+                    payload.conversation_id or "",
+                    MessageCreate(
+                        message_type="post_share",
+                        text_content=payload.message_text,
+                        payload={"post_share_id": post_share_id},
+                        client_message_id=payload.client_message_id,
+                        target_object_type="social_post",
+                        target_object_id=social_post_id,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE post_shares
+                    SET message_id = ?
+                    WHERE post_share_id = ?;
+                    """,
+                    (sent.message.message_id, post_share_id),
+                )
+
+            stats = _update_stat_count(connection, social_post_id, "share_count", 1)
+            row = connection.execute(
+                """
+                SELECT *
+                FROM post_shares
+                WHERE post_share_id = ?
+                LIMIT 1;
+                """,
+                (post_share_id,),
+            ).fetchone()
+        return PostShareResponse(success=True, share=_share_record(row), stats=stats)
+    except sqlite3.IntegrityError as error:
+        if "UNIQUE constraint failed" in str(error):
+            raise_api_error(
+                status.HTTP_409_CONFLICT,
+                "CLIENT_MESSAGE_ID_CONFLICT",
+                "client_message_id is already bound to another request.",
+            )
+        raise

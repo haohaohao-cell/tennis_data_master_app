@@ -18,9 +18,25 @@ logs/
 *.log
 *.sqlite
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 *.db
 *.db-shm
 *.db-wal
+
+# Local database audit output and rendered test schemas
+backend/db/stage*.json
+backend/db/stage*.txt
+backend/db/stage*.sql
+backend/db/stage*-output/
+
+# Local secrets and PostgreSQL connection files
+.env
+.env.*
+!.env.example
+*.dsn
+*.pgpass
+pg_service.conf
 
 # Backend runtime uploads and generated media
 backend/storage/

@@ -42,7 +42,7 @@ export default function TabLayout() {
       void getUnreadCounts(accessToken)
         .then((response) => {
           if (active) {
-            setUnreadCount(response.total_unread_count);
+            setUnreadCount(response.messages_tab_badge_count);
           }
         })
         .catch(() => {

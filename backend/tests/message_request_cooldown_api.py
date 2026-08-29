@@ -33,6 +33,7 @@ async def main() -> None:
         os.environ["TENNIS_DB_PATH"] = str(Path(temp_dir) / "message_request_cooldown.sqlite3")
 
         from backend.app.core.database import get_connection, initialize_database, transaction
+        from backend.app.core.config import settings
         from backend.app.main import app
 
         initialize_database()
@@ -164,12 +165,19 @@ async def main() -> None:
         legacy_id = legacy.json_body["request"]["message_request_id"]
         legacy_declined = await asgi_request(app, "POST", f"{REQUEST_PATH}/{legacy_id}/decline", headers=alice_headers)
         assert legacy_declined.status == 200
-        with transaction() as connection:
-            connection.execute("PRAGMA ignore_check_constraints = ON;")
-            connection.execute("UPDATE chat_message_requests SET responded_at = NULL WHERE message_request_id = ?;", (legacy_id,))
-            connection.execute("PRAGMA ignore_check_constraints = OFF;")
-        legacy_retry = await create_request(app, dave_headers, alice_id, "legacy retry allowed")
-        assert legacy_retry.status == 201
+        if settings.uses_postgres:
+            # PostgreSQL correctly enforces the declined-row invariant, so a
+            # malformed legacy row cannot be fabricated without weakening the
+            # production constraint. SQLite retains the legacy compatibility
+            # branch below for databases that can contain that historical row.
+            legacy_retry = None
+        else:
+            with transaction() as connection:
+                connection.execute("PRAGMA ignore_check_constraints = ON;")
+                connection.execute("UPDATE chat_message_requests SET responded_at = NULL WHERE message_request_id = ?;", (legacy_id,))
+                connection.execute("PRAGMA ignore_check_constraints = OFF;")
+            legacy_retry = await create_request(app, dave_headers, alice_id, "legacy retry allowed")
+            assert legacy_retry.status == 201
 
         # Block remains authoritative during any request state.
         blocked_request = await create_request(app, alice_headers, frank_id, "blocked request")

@@ -828,10 +828,12 @@ player_b_name = "训练对手"
 | `chat_conversations` | `conversation_id`、`conversation_type`、`group_type`、`direct_pair_key`、`title`、`created_by_user_id`、`context_type`、`context_id`、`status`、`last_message_id`、`last_message_seq`、`last_message_preview`、`last_message_at` |
 | `chat_conversation_members` | `conversation_member_id`、`conversation_id`、`user_id`、`member_role`、`status`、`joined_at`、`left_at`、`last_read_message_id`、`last_read_message_seq`、`last_read_at`、`unread_count`、`muted_until`、`pinned_at`、`archived_at` |
 | `chat_messages` | `message_id`、`conversation_id`、`message_seq`、`sender_user_id`、`sender_type`、`message_type`、`text_content`、`payload_json`、`target_object_type`、`target_object_id`、`context_object_type`、`context_object_id`、`reply_to_message_id`、`client_message_id`、`status`、`sent_at` |
-| `chat_message_attachments` | `attachment_id`、`message_id`、`attachment_type`、`media_path`、`thumbnail_path`、`mime_type`、`file_size_bytes`、`duration_ms`、`width_px`、`height_px`、`object_type`、`object_id`、`payload_json`、`sort_order` |
+| `chat_message_attachments` | `attachment_id`、`message_id`、`attachment_type`、`media_id`、`media_path`、`thumbnail_path`、`mime_type`、`file_size_bytes`、`duration_ms`、`width_px`、`height_px`、`object_type`、`object_id`、`payload_json`、`sort_order` |
 | `chat_message_requests` | `message_request_id`、`requester_user_id`、`recipient_user_id`、`conversation_id`、`status`、`request_message`、`source`、`requested_at`、`responded_at`、`created_at`、`updated_at` |
 
 `client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
+
+消息图片媒体 `chat_message_media` 使用独立存储根目录。`thumbnail_status` 为 `pending`、`generated` 或 `failed`；`thumbnail_failure_code` 记录派生缩略图失败原因。`storage_deleted_at` 表示原图和缩略图均完成删除，`last_cleanup_error` 保存最近一次清理错误。缩略图失败不代表原图校验失败，原图必须保留并继续按其上传状态治理。
 
 陌生人消息请求在 `status = pending` 时 `(requester_user_id, recipient_user_id)` 唯一。接受请求后创建或复用双方 direct conversation，并把 `conversation_id` 写回请求记录。
 
@@ -1684,4 +1686,30 @@ P2 范围：
 6. 是否需要新增数据库约束、索引、外键或迁移。
 7. 是否需要新增 API schema、前端类型、App 模型和测试用例。
 8. 如果是统计指标，是否明确 `metric_code`、`metric_unit`、`sample_size`、`scope_type`、`confidence` 和 `algorithm_version`。
+
+消息计数口径：`chat_conversation_members.unread_count` 是会话级未读事实，
+`user_inbox_counters` 是派生导航缓存，可从 active 会话成员未读事实重建。
+SQLite 迁移输入、PostgreSQL 目标修复和校验结果必须分别记录；消息媒体文件
+不属于数据库迁移内容，需独立治理。
 9. 如果是 P1/P2 算法字段，是否明确输入来源、计算口径、算法版本和可回溯证据。
+
+### 消息可靠性字段
+
+| 字段/模型 | 类型与口径 | 数据边界 |
+| --- | --- | --- |
+| `chat_messages.client_message_id` | 发送用户作用域内的幂等键 | 服务端消息契约 |
+| `outbox_events.event_id` | 全局唯一事件 ID | 服务端 durable event |
+| `outbox_events.message_seq` | 会话内权威消息序号 | 与 `chat_messages.message_seq` 一致 |
+| `outbox_events.payload_json` | 受限 JSON envelope | 不包含密码、令牌、私有 storage key 或完整业务对象 |
+| 客户端 `device_id` | 本地设备/队列标识 | 不参与业务唯一性，不上传为消息内容 |
+| 客户端 `local_state` | `queued`/`sending`/`sent`/`failed_retryable`/`failed_permanent`/`cancelled` | 仅客户端状态机 |
+
+事件租约只修改事件元数据，不执行业务副作用；事件保留和归档属于后续
+维护任务不执行批量删除。
+
+### 消息视频媒体字段
+
+`chat_message_media.media_type` 可为 `image` 或 `video`。视频新增
+`duration_ms`、`checksum_sha256`、`expected_checksum_sha256`、`container` 和
+`codec`；原文件大小、宽高、MIME 和生命周期状态仍由媒体表统一维护。
+视频首帧是可删除的派生缩略图，媒体文件不随数据库迁移复制。

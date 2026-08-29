@@ -141,7 +141,8 @@ async def main() -> None:
             },
             headers=alice_headers,
         )
-        assert retry.status == 201
+        assert retry.status == 409
+        assert retry.json_body["detail"]["code"] == "CLIENT_MESSAGE_ID_CONFLICT"
         with get_connection() as connection:
             assert connection.execute(
                 "SELECT COUNT(*) FROM chat_messages WHERE conversation_id = ?;",
