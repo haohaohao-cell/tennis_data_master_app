@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,6 +17,8 @@ EXPECTED_TABLES = (
     "auth_identities",
     "auth_sessions",
     "auth_verification_codes",
+    "coach_applications",
+    "coach_profiles",
     "lessons",
     "lesson_students",
     "tennis_activities",
@@ -74,7 +75,7 @@ def list_tables(db_path: Path) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Initialize the SQLite database for the tennis data master app."
+        description="Initialize a legacy SQLite source for one-time PostgreSQL migration."
     )
     parser.add_argument(
         "--schema",
@@ -101,19 +102,17 @@ def initialize_database(schema_path: Path, db_path: Path, force: bool = False) -
         raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if schema_path.resolve() == DEFAULT_SCHEMA_PATH.resolve():
-        if force and db_path.exists():
-            db_path.unlink()
-        os.environ["TENNIS_DB_PATH"] = str(db_path.resolve())
-        from backend.app.core.database import initialize_database as initialize_runtime_database
-
-        initialize_runtime_database()
-        return list_tables(db_path)
-
     if force and db_path.exists():
         db_path.unlink()
 
     schema_sql = schema_path.read_text(encoding="utf-8")
+    # This command is intentionally isolated from the application runtime. It
+    # creates a disposable SQLite source for the one-time PostgreSQL transfer.
+    # The checked-in backend schema already contains the message tables; the
+    # incremental file is included for callers supplying an older/custom base.
+    incremental_schema_path = schema_path.parent / "social_message_schema.sql"
+    if incremental_schema_path.is_file() and schema_path.resolve() == DEFAULT_SCHEMA_PATH.resolve():
+        schema_sql += "\n" + incremental_schema_path.read_text(encoding="utf-8")
 
     connection = sqlite3.connect(db_path)
     try:
@@ -145,7 +144,7 @@ def main() -> None:
     if missing_tables:
         raise RuntimeError(f"Database initialized but missing tables: {missing_tables}")
 
-    print(f"SQLite database initialized: {args.db.resolve()}")
+    print(f"Legacy SQLite migration source initialized: {args.db.resolve()}")
     print("Tables:")
     for table_name in tables:
         print(f"- {table_name}")

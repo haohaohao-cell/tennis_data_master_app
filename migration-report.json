@@ -1,0 +1,385 @@
+{
+  "command": "migrate_sqlite_to_postgres.py",
+  "run_at_utc": "2026-08-31T19:27:45.224345+00:00",
+  "sqlite": "C:\\Users\\li\\Documents\\projects\\tennis_data_master_app\\backend\\db\\tennis_data_master.sqlite3",
+  "sqlite_size_bytes": 1060864,
+  "sqlite_mtime": 1786123492.7551613,
+  "dry_run": false,
+  "tables": {
+    "users": {
+      "source": 5,
+      "inserted": 5,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "admin_users": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "admin_credentials": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "auth_identities": {
+      "source": 5,
+      "inserted": 5,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "auth_sessions": {
+      "source": 7,
+      "inserted": 7,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "auth_verification_codes": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "coach_applications": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "coach_profiles": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_privacy_settings": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_follows": {
+      "source": 4,
+      "inserted": 4,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_blocks": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_social_stats": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "lessons": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "lesson_students": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "tennis_activities": {
+      "source": 2,
+      "inserted": 2,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "videos": {
+      "source": 35,
+      "inserted": 35,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "video_shares": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "social_posts": {
+      "source": 31,
+      "inserted": 31,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "social_post_stats": {
+      "source": 31,
+      "inserted": 31,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "post_media": {
+      "source": 31,
+      "inserted": 31,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "post_reactions": {
+      "source": 4,
+      "inserted": 4,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "post_favorites": {
+      "source": 2,
+      "inserted": 2,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "post_comments": {
+      "source": 9,
+      "inserted": 9,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_post_views": {
+      "source": 100,
+      "inserted": 100,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_post_hides": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "chat_conversations": {
+      "source": 1,
+      "inserted": 1,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "chat_messages": {
+      "source": 6,
+      "inserted": 6,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "chat_conversation_members": {
+      "source": 2,
+      "inserted": 2,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "chat_message_attachments": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "chat_message_requests": {
+      "source": 3,
+      "inserted": 3,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "post_shares": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "notification_events": {
+      "source": 20,
+      "inserted": 20,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_notifications": {
+      "source": 20,
+      "inserted": 20,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "user_inbox_counters": {
+      "source": 4,
+      "inserted": 4,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "content_reports": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "points": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    },
+    "shots": {
+      "source": 0,
+      "inserted": 0,
+      "skipped_identical": 0,
+      "conflicts": 0,
+      "unique_conflicts": 0,
+      "conflict_keys": []
+    }
+  },
+  "media_files_migrated": false,
+  "retryable": true,
+  "source_sha256": "d756caa6d2d538ad367df9bcb950eef0415ffa3da720d2275e26ab288a8614e0",
+  "source_files": {
+    "main": {
+      "path": "backend\\db\\tennis_data_master.sqlite3",
+      "exists": true,
+      "size_bytes": 1060864,
+      "mtime_ns": 1786123492755161300,
+      "sha256": "d756caa6d2d538ad367df9bcb950eef0415ffa3da720d2275e26ab288a8614e0"
+    },
+    "wal": {
+      "path": "backend\\db\\tennis_data_master.sqlite3-wal",
+      "exists": true,
+      "size_bytes": 0,
+      "mtime_ns": 1788094673053338600,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "shm": {
+      "path": "backend\\db\\tennis_data_master.sqlite3-shm",
+      "exists": true,
+      "size_bytes": 32768,
+      "mtime_ns": 1788204465220834100,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    }
+  },
+  "target_schema": "public",
+  "source_metadata": {
+    "path": "C:\\Users\\li\\Documents\\projects\\tennis_data_master_app\\backend\\db\\tennis_data_master.sqlite3"
+  },
+  "source_counts": {
+    "users": 5,
+    "admin_users": 0,
+    "admin_credentials": 0,
+    "auth_identities": 5,
+    "auth_sessions": 7,
+    "auth_verification_codes": 0,
+    "coach_applications": 0,
+    "coach_profiles": 0,
+    "user_privacy_settings": 0,
+    "user_follows": 4,
+    "user_blocks": 0,
+    "user_social_stats": 0,
+    "lessons": 0,
+    "lesson_students": 0,
+    "tennis_activities": 2,
+    "videos": 35,
+    "video_shares": 0,
+    "social_posts": 31,
+    "social_post_stats": 31,
+    "post_media": 31,
+    "post_reactions": 4,
+    "post_favorites": 2,
+    "post_comments": 9,
+    "user_post_views": 100,
+    "user_post_hides": 0,
+    "chat_conversations": 1,
+    "chat_messages": 6,
+    "chat_conversation_members": 2,
+    "chat_message_attachments": 0,
+    "chat_message_requests": 3,
+    "post_shares": 0,
+    "notification_events": 20,
+    "user_notifications": 20,
+    "user_inbox_counters": 4,
+    "content_reports": 0,
+    "points": 0,
+    "shots": 0
+  },
+  "source_table_count": 37,
+  "source_issues": [],
+  "source_details": {
+    "null_primary_keys": {},
+    "duplicate_idempotency_keys": {},
+    "orphan_records": {},
+    "json_invalid": {},
+    "cache_drift": {}
+  },
+  "status": "ok"
+}

@@ -1,0 +1,261 @@
+{
+  "command": "validate_postgres_migration.py",
+  "run_at_utc": "2026-08-31T19:28:23.867219+00:00",
+  "sqlite": "C:\\Users\\li\\Documents\\projects\\tennis_data_master_app\\backend\\db\\tennis_data_master.sqlite3",
+  "source_sha256": "d756caa6d2d538ad367df9bcb950eef0415ffa3da720d2275e26ab288a8614e0",
+  "source_files": {
+    "main": {
+      "path": "backend\\db\\tennis_data_master.sqlite3",
+      "exists": true,
+      "size_bytes": 1060864,
+      "mtime_ns": 1786123492755161300,
+      "sha256": "d756caa6d2d538ad367df9bcb950eef0415ffa3da720d2275e26ab288a8614e0"
+    },
+    "wal": {
+      "path": "backend\\db\\tennis_data_master.sqlite3-wal",
+      "exists": true,
+      "size_bytes": 0,
+      "mtime_ns": 1788094673053338600,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "shm": {
+      "path": "backend\\db\\tennis_data_master.sqlite3-shm",
+      "exists": true,
+      "size_bytes": 32768,
+      "mtime_ns": 1788204503672601300,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    }
+  },
+  "target": {
+    "database": "tennis_data_master",
+    "user": "postgres",
+    "schema": "public",
+    "search_path_before": "\"$user\", public",
+    "schema_usage": true,
+    "schema_create": true,
+    "server_version": "PostgreSQL 17.11 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit"
+  },
+  "tables": {
+    "users": {
+      "source": 5,
+      "target": 5,
+      "match": true
+    },
+    "admin_users": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "admin_credentials": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "auth_identities": {
+      "source": 5,
+      "target": 5,
+      "match": true
+    },
+    "auth_sessions": {
+      "source": 7,
+      "target": 7,
+      "match": true
+    },
+    "auth_verification_codes": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "coach_applications": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "coach_profiles": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "user_privacy_settings": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "user_follows": {
+      "source": 4,
+      "target": 4,
+      "match": true
+    },
+    "user_blocks": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "user_social_stats": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "lessons": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "lesson_students": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "tennis_activities": {
+      "source": 2,
+      "target": 2,
+      "match": true
+    },
+    "videos": {
+      "source": 35,
+      "target": 35,
+      "match": true
+    },
+    "video_shares": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "social_posts": {
+      "source": 31,
+      "target": 31,
+      "match": true
+    },
+    "social_post_stats": {
+      "source": 31,
+      "target": 31,
+      "match": true
+    },
+    "post_media": {
+      "source": 31,
+      "target": 31,
+      "match": true
+    },
+    "post_reactions": {
+      "source": 4,
+      "target": 4,
+      "match": true
+    },
+    "post_favorites": {
+      "source": 2,
+      "target": 2,
+      "match": true
+    },
+    "post_comments": {
+      "source": 9,
+      "target": 9,
+      "match": true
+    },
+    "user_post_views": {
+      "source": 100,
+      "target": 100,
+      "match": true
+    },
+    "user_post_hides": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "chat_conversations": {
+      "source": 1,
+      "target": 1,
+      "match": true
+    },
+    "chat_messages": {
+      "source": 6,
+      "target": 6,
+      "match": true
+    },
+    "chat_conversation_members": {
+      "source": 2,
+      "target": 2,
+      "match": true
+    },
+    "chat_message_attachments": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "chat_message_requests": {
+      "source": 3,
+      "target": 3,
+      "match": true
+    },
+    "post_shares": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "notification_events": {
+      "source": 20,
+      "target": 20,
+      "match": true
+    },
+    "user_notifications": {
+      "source": 20,
+      "target": 20,
+      "match": true
+    },
+    "user_inbox_counters": {
+      "source": 4,
+      "target": 4,
+      "match": true
+    },
+    "content_reports": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "points": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    },
+    "shots": {
+      "source": 0,
+      "target": 0,
+      "match": true
+    }
+  },
+  "foreign_key_constraints": 83,
+  "missing_expected_tables": [],
+  "unique_checks": {
+    "message_seq_duplicates": 0,
+    "client_message_id_duplicates": 0,
+    "post_share_client_message_duplicates": 0,
+    "media_upload_id_duplicates": 0,
+    "media_binding_duplicates": 0
+  },
+  "message_checks": {
+    "last_message_mismatches": 0,
+    "message_seq_gaps": 0
+  },
+  "json_invalid": {
+    "chat_messages.payload_json": 0,
+    "chat_message_attachments.payload_json": 0,
+    "notification_events.payload_json": 0,
+    "post_shares.payload_json": 0
+  },
+  "counter_checks": {
+    "conversation_unread_drift": 0,
+    "inbox_direct_drift": 0,
+    "inbox_group_drift": 0,
+    "invalid_media_storage_namespace": 0
+  },
+  "source_schema_table_count": 37,
+  "target_schema_table_count": 40,
+  "target_extra_tables": [],
+  "target_expected_extension_tables": [
+    "chat_message_media",
+    "outbox_events",
+    "user_notification_preferences"
+  ],
+  "target_extra_rows": {},
+  "target_data_state": "CLEAN_SCHEMA",
+  "status": "ok"
+}

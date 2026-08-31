@@ -1,0 +1,57 @@
+{
+  "command": "reconcile_inbox_counters.py",
+  "run_at_utc": "2026-08-31T19:28:33.789931+00:00",
+  "sqlite": "C:\\Users\\li\\Documents\\projects\\tennis_data_master_app\\backend\\db\\tennis_data_master.sqlite3",
+  "source_sha256": "d756caa6d2d538ad367df9bcb950eef0415ffa3da720d2275e26ab288a8614e0",
+  "source_status": "source_clean",
+  "source_rows": [
+    {
+      "user_id": "18b41e77-fdca-483a-934d-b67517da5343",
+      "stored_direct": 0,
+      "stored_group": 0,
+      "derived_direct": 0,
+      "derived_group": 0,
+      "direct_delta": 0,
+      "group_delta": 0
+    },
+    {
+      "user_id": "5e086c8c-ca94-4d14-a086-3a06f66a9914",
+      "stored_direct": 0,
+      "stored_group": 0,
+      "derived_direct": 0,
+      "derived_group": 0,
+      "direct_delta": 0,
+      "group_delta": 0
+    },
+    {
+      "user_id": "5fa85939-238e-420c-982e-2d79da8586c8",
+      "stored_direct": 0,
+      "stored_group": 0,
+      "derived_direct": 0,
+      "derived_group": 0,
+      "direct_delta": 0,
+      "group_delta": 0
+    },
+    {
+      "user_id": "9f93235f-c50f-4231-b310-650314e3079a",
+      "stored_direct": 0,
+      "stored_group": 0,
+      "derived_direct": 0,
+      "derived_group": 0,
+      "direct_delta": 0,
+      "group_delta": 0
+    },
+    {
+      "user_id": "a5e98276-62c9-4bc5-8269-e4e2bd9dff32",
+      "stored_direct": 0,
+      "stored_group": 0,
+      "derived_direct": 0,
+      "derived_group": 0,
+      "direct_delta": 0,
+      "group_delta": 0
+    }
+  ],
+  "execute": false,
+  "destination_status": "not_requested",
+  "status": "source_clean"
+}

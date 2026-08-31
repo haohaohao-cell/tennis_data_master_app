@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT_DIR))
 
 PREFERRED_ORDER = [
     "users", "admin_users", "admin_credentials", "auth_identities", "auth_sessions",
-    "auth_verification_codes", "user_privacy_settings", "user_notification_preferences",
+    "auth_verification_codes", "coach_applications", "coach_profiles",
+    "user_privacy_settings", "user_notification_preferences",
     "user_follows", "user_blocks", "user_social_stats", "lessons", "lesson_students",
     "tennis_activities", "videos", "video_shares", "social_posts", "social_post_stats",
     "post_media", "post_reactions", "post_favorites", "post_comments", "user_post_views",
@@ -238,7 +239,11 @@ def validate_source(connection: sqlite3.Connection, tables: list[str]) -> dict[s
 def existing_row(pg: Any, table: str, columns: list[str], pk: list[str], values: tuple[Any, ...]) -> tuple[Any, ...] | None:
     where = " AND ".join(f'"{column}" = %s' for column in pk)
     params = tuple(values[columns.index(column)] for column in pk)
-    row = pg.execute(f'SELECT {", ".join(f"\"{c}\"" for c in columns)} FROM "{table}" WHERE {where}', params).fetchone()
+    quoted_columns = ", ".join(f'"{column}"' for column in columns)
+    row = pg.execute(
+        f'SELECT {quoted_columns} FROM "{table}" WHERE {where}',
+        params,
+    ).fetchone()
     return tuple(row) if row is not None else None
 
 

@@ -51,8 +51,8 @@ class Settings:
             str(ROOT_DIR / "backend" / "storage" / "message_media"),
         )
     )
-    # PostgreSQL is the production authority when a DSN is configured. SQLite
-    # remains available for local legacy-data reads and lightweight tests.
+    # PostgreSQL is the only runtime database. SQLite is intentionally limited
+    # to the explicit legacy migration utilities under scripts/.
     database_url: str | None = os.getenv("TENNIS_DATABASE_URL") or os.getenv("TENNIS_POSTGRES_DSN")
     database_pool_min_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MIN_SIZE", "1"))
     database_pool_max_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MAX_SIZE", "10"))
@@ -103,7 +103,10 @@ class Settings:
 
     @property
     def uses_postgres(self) -> bool:
-        return bool(self.database_url)
+        # Keep one database contract across every backend module. A missing
+        # DSN is reported by the PostgreSQL adapter instead of silently
+        # creating a local SQLite file.
+        return True
 
 
 settings = Settings()

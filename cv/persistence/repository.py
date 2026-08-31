@@ -1,4 +1,4 @@
-"""Centralized SQLite CRUD helpers for the tennis analysis system.
+"""Centralized PostgreSQL CRUD helpers for the tennis analysis system.
 
 This module keeps all database operations in one place and covers the current
 core tables:
@@ -17,7 +17,6 @@ Most important entry points:
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -125,13 +124,13 @@ SHOT_COLUMNS = (
 )
 
 
-def _dict_from_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _dict_from_row(row: Any | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
 
 
-def _dicts_from_rows(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
+def _dicts_from_rows(rows: Iterable[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
@@ -151,14 +150,13 @@ def _load_json_payload(payload_or_path: dict[str, Any] | str | Path) -> dict[str
 
 
 class TennisAnalysisRepository:
-    """Single entry point for all SQLite reads and writes."""
+    """Single entry point for all CV PostgreSQL reads and writes."""
 
     def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
         self.db_path = Path(db_path)
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self):
         connection = get_connection(self.db_path)
-        connection.row_factory = sqlite3.Row
         return connection
 
     def ensure_schema(self) -> Path:

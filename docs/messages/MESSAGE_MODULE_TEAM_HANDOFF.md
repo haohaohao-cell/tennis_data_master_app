@@ -4,7 +4,7 @@
 
 `chat_message_media` 是媒体生命周期和已验证文件元数据的唯一消息媒体表；`chat_message_attachments` 是消息到媒体或对象卡片的关系表。消息视频不使用 Post、Activity、`videos` 或 `app/api/uploads.ts`。`client_upload_id` 只负责上传幂等，`client_message_id` 只负责消息幂等。
 
-SQLite 用于旧数据读取、迁移输入和轻量回归；PostgreSQL 是配置数据库 URL 后的写入权威。迁移前必须通过只读完整性审计确认 SQLite 源库，并将派生 inbox cache drift 显式记录；不得静默修复或覆盖源文件。
+PostgreSQL 是消息模块及其他后端模块的唯一运行时数据库；SQLite 仅用于旧数据只读审计和迁移输入。迁移前必须通过只读完整性审计确认源库，并将派生 inbox cache drift 显式记录；不得静默修复或覆盖源文件。
 
 常用检查：
 
@@ -26,9 +26,7 @@ python tests/message_video_static.py
 python tests/message_image_static.py
 ```
 
-消息后端全量回归应在独立子进程中清除 `TENNIS_DATABASE_URL` 和
-`TENNIS_POSTGRES_DSN`，为每个测试提供临时 `TENNIS_DB_PATH`；不得让回归测试
-读取默认 SQLite。PostgreSQL 回归则只使用本地 `tennis_messages_test`、
+消息后端全量回归必须配置 PostgreSQL，并只使用本地 `tennis_data_master`、
 `test_user` 和新建的 `message_*` 隔离 Schema，并通过 DSN 的 `search_path`
 显式选择 Schema。
 
@@ -37,7 +35,7 @@ python tests/message_image_static.py
 必须区分消息模块错误和其他页面错误。当前 App 类型检查仍有 profile 页面
 的既有错误，不能写成全项目 typecheck 通过。
 
-本地 SQLite 默认文件是已确认的可信迁移源，但每次迁移仍须以只读方式审计文件指纹、
+本地 SQLite 文件是已确认的可信迁移源，但每次迁移仍须以只读方式审计文件指纹、
 表结构、外键和计数。审计命令必须带上已批准的 SHA-256；任何派生 cache drift 都不得
 在源库中修复或覆盖。
 

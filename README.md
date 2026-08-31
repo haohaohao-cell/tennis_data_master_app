@@ -21,22 +21,17 @@ Download the AreaCity boundary CSV used by the location resolver. The script wri
 python scripts/download_area_city_data.py
 ```
 
-Initialize the local SQLite database. The database file is local runtime state and is ignored by Git.
-
-```powershell
-python scripts/init_sqlite_db.py
-```
-
-For PostgreSQL-backed development or production, set `TENNIS_DATABASE_URL`,
-install `backend/requirements.txt`, and initialize the PostgreSQL schema:
+Set `TENNIS_DATABASE_URL`, install `backend/requirements.txt`, and initialize
+the complete PostgreSQL schema (backend `public` plus CV `cv_analysis`):
 
 ```powershell
 $env:TENNIS_DATABASE_HOST = "localhost"
 $env:TENNIS_DATABASE_PORT = "5432"
-$env:TENNIS_DATABASE_NAME = "tennis_messages_test"
-# Set TENNIS_DATABASE_URL in the same PowerShell process without committing it.
+$env:TENNIS_DATABASE_NAME = "tennis_data_master"
+$env:TENNIS_DATABASE_URL = "postgresql://postgres@localhost:5432/tennis_data_master"
+# Use your local PostgreSQL user/password as appropriate; do not commit the DSN.
 python scripts/inspect_postgres_environment.py
-python scripts/init_postgres_db.py --schema message_<timestamp>
+python scripts/init_postgres_db.py
 ```
 
 For the Expo app, install the locked dependencies and run the strict TypeScript
@@ -52,10 +47,13 @@ The current repository has three unrelated pre-existing type errors in
 `app/app/(tabs)/profile.tsx`; they must be fixed before claiming a full-project
 typecheck pass. Message-module static tests remain runnable independently.
 
-PostgreSQL is the only production write authority. SQLite is retained for
-legacy-data reads, migration input, and lightweight tests. See
-`docs/database/POSTGRES_MIGRATION.md` for the non-destructive transfer and
-validation commands.
+PostgreSQL is the only application database for backend and CV persistence.
+SQLite is supported only as an explicit, read-only source for the one-time
+transfer utility. See `docs/database/POSTGRES_MIGRATION.md` for the
+non-destructive transfer and validation commands.
+
+若存在历史 CV SQLite 文件，先执行
+`python scripts/migrate_cv_sqlite_to_postgres.py --sqlite <路径> --dsn $env:TENNIS_DATABASE_URL --dry-run`，确认后去掉 `--dry-run` 执行导入。
 
 Message video operations require `ffprobe.exe` and `ffmpeg.exe` on PATH (or
 `TENNIS_FFPROBE_PATH`/`TENNIS_FFMPEG_PATH`). See
@@ -145,6 +143,6 @@ README.md
 ```
 
 Message history, search, reconcile, and Post card hydration are bounded per
-page. Keep SQLite and PostgreSQL validation or performance reports in local,
+page. Keep migration and PostgreSQL validation or performance reports in local,
 ignored paths; they are environment-specific evidence rather than repository
 artifacts.

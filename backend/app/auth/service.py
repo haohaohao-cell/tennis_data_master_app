@@ -343,7 +343,7 @@ def login_with_phone_code(
     # Login may create the user and identity. Acquire SQLite's writer lock
     # before the initial lookup so concurrent first-time logins do not both
     # read and then race while upgrading a deferred transaction.
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"login-phone:{phone_normalized}") as connection:
         user_row = _get_or_create_user_for_phone(connection, phone_normalized)
         connection.execute(
             """

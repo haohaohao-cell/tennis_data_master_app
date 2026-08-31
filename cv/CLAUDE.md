@@ -4,7 +4,7 @@
 
 - `cv.pipeline.run_inference_v2`: 后端推理入口。
 - `cv.cli.inference`: 唯一的生产命令行入口；`cv.scripts.run_inference_v2` 仅保留兼容调用。
-- `cv.scripts.db_operations.TennisAnalysisRepository`: SQLite 访问入口。
+- `cv.scripts.db_operations.TennisAnalysisRepository`: PostgreSQL 访问入口（`TENNIS_DATABASE_URL`，默认 schema `cv_analysis`）。
 
 `cv/scripts` 是兼容层，不应继续放置业务实现。新增代码按职责放入 `pipeline`、`segmentation`、`builders`、`tracking`、`court`、`events`、`analytics`、`persistence`、`visualization` 或 `io`。
 

@@ -1,4 +1,4 @@
-"""Core business tables for the tennis analysis system.
+"""Core PostgreSQL business tables for the tennis analysis system.
 
 Minimal schema:
 - users: registered users
@@ -8,7 +8,6 @@ Minimal schema:
 from __future__ import annotations
 
 import argparse
-import sqlite3
 from pathlib import Path
 
 from .connection import DEFAULT_DB_PATH, get_connection
@@ -71,10 +70,16 @@ UPLOAD_PROGRESS_COLUMNS: dict[str, str] = {
 }
 
 
-def _ensure_upload_progress_columns(connection: sqlite3.Connection) -> None:
+def _ensure_upload_progress_columns(connection) -> None:
     existing_columns = {
-        row[1]
-        for row in connection.execute("PRAGMA table_info(uploads)").fetchall()
+        row["column_name"]
+        for row in connection.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'uploads'
+            """
+        ).fetchall()
     }
     for column_name, column_sql in UPLOAD_PROGRESS_COLUMNS.items():
         if column_name in existing_columns:
@@ -94,17 +99,17 @@ def create_core_tables(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create the core business tables.")
+    parser = argparse.ArgumentParser(description="Create the CV PostgreSQL core tables.")
     parser.add_argument(
         "--db-path",
         type=Path,
         default=DEFAULT_DB_PATH,
-        help="Target SQLite database path.",
+        help="Deprecated compatibility path; PostgreSQL DSN comes from environment.",
     )
     args = parser.parse_args()
 
     db_path = create_core_tables(args.db_path)
-    print(f"SQLite core tables are ready: {db_path}")
+    print(f"CV PostgreSQL core tables are ready (schema from environment); path ignored: {db_path}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
-"""Small PostgreSQL adapter used by the existing hand-written SQL services.
+"""PostgreSQL adapter used by the existing hand-written SQL services.
 
 The application deliberately keeps its service SQL and public identifiers
 stable during the database migration. This module owns driver-specific
 details: qmark-to-pyformat conversion, dict-like rows, pooled connections,
-and PostgreSQL error mapping. SQLite remains the default when no DSN is set.
+and PostgreSQL error mapping. PostgreSQL is mandatory for runtime requests;
+SQLite is used only by explicit offline migration tools.
 """
 
 from __future__ import annotations
@@ -242,6 +243,11 @@ def map_database_error(error: Exception) -> Exception:
 
 
 def _open_raw() -> Any:
+    if not settings.database_url:
+        raise RuntimeError(
+            "TENNIS_DATABASE_URL (or TENNIS_POSTGRES_DSN) must be configured; "
+            "SQLite runtime fallback has been removed."
+        )
     try:
         import psycopg
     except ImportError as error:
@@ -281,6 +287,11 @@ atexit.register(close_pool)
 
 
 def _get_pool() -> Any:
+    if not settings.database_url:
+        raise RuntimeError(
+            "TENNIS_DATABASE_URL (or TENNIS_POSTGRES_DSN) must be configured; "
+            "SQLite runtime fallback has been removed."
+        )
     global _POOL, _POOL_KEY
     key = _pool_key()
     if _POOL is not None and _POOL_KEY != key:
@@ -329,13 +340,12 @@ def transaction(*, immediate: bool = False, lock_key: str | None = None) -> Iter
         try:
             wrapped.execute("BEGIN;")
             if immediate:
-                # SQLite BEGIN IMMEDIATE serialized writers. Prefer a stable
-                # per-resource lock; the legacy global fallback is retained
-                # for callers that have not supplied a safe resource key.
+                # SQLite BEGIN IMMEDIATE serialized all writers. PostgreSQL
+                # already takes row locks for UPDATE/UPSERT statements, so a
+                # caller must opt into an advisory lock for cross-row
+                # serialization. Never use a process-wide fallback lock.
                 if lock_key:
                     wrapped.execute("SELECT pg_advisory_xact_lock(hashtext(?));", (lock_key,))
-                else:
-                    wrapped.execute("SELECT pg_advisory_xact_lock(2147483647);")
             yield wrapped
             wrapped.commit()
         except Exception:

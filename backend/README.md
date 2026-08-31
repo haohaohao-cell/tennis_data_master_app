@@ -10,6 +10,11 @@ Use the project Conda environment before running backend commands:
 conda activate tennis
 ```
 
+The backend requires PostgreSQL. Set `TENNIS_DATABASE_URL` (or the compatibility
+alias `TENNIS_POSTGRES_DSN`) before starting the API; there is no SQLite runtime
+fallback. Run `python scripts/init_postgres_db.py` once to create both the
+backend schema and the CV `cv_analysis` schema.
+
 Start the local API server:
 
 ```bash

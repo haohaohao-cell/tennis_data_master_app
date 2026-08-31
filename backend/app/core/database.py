@@ -1113,42 +1113,9 @@ def _run_message_outbox_migrations(connection: sqlite3.Connection) -> None:
         """
     )
 def initialize_database() -> None:
-    if settings.uses_postgres:
-        from .postgres_schema import initialize_postgres_schema
+    # Runtime schema initialization is PostgreSQL-only. Legacy SQLite helpers
+    # in this module are retained solely for historical tooling and are never
+    # selected by the application.
+    from .postgres_schema import initialize_postgres_schema
 
-        initialize_postgres_schema()
-        return
-    schema_sql = settings.schema_path.read_text(encoding="utf-8")
-    social_message_schema_path = settings.schema_path.parent / "social_message_schema.sql"
-    social_message_schema_sql = social_message_schema_path.read_text(encoding="utf-8")
-    with get_connection() as connection:
-        connection.execute("PRAGMA journal_mode = WAL;")
-        connection.execute("PRAGMA foreign_keys = OFF;")
-        if _table_exists(connection, "users"):
-            _run_users_migrations(connection)
-            _run_video_upload_migrations(connection)
-            _run_activity_location_migrations(connection)
-            _run_post_feed_migrations(connection)
-            _run_post_share_message_migrations(connection)
-            _run_message_media_migrations(connection)
-            _run_message_outbox_migrations(connection)
-            connection.executescript(AUTH_SCHEMA_SQL)
-        else:
-            connection.executescript(schema_sql)
-            _run_users_migrations(connection)
-            _run_video_upload_migrations(connection)
-            _run_activity_location_migrations(connection)
-            _run_post_feed_migrations(connection)
-            _run_post_share_message_migrations(connection)
-            _run_message_media_migrations(connection)
-            _run_message_outbox_migrations(connection)
-        _repair_stale_tennis_activity_fk_references(connection)
-        connection.executescript(social_message_schema_sql)
-        connection.executescript(ADMIN_SCHEMA_SQL)
-        connection.executescript(COACH_SCHEMA_SQL)
-        connection.commit()
-        connection.execute("PRAGMA foreign_keys = ON;")
-
-        foreign_key_issues = list(connection.execute("PRAGMA foreign_key_check;"))
-        if foreign_key_issues:
-            raise RuntimeError(f"Foreign key check failed: {foreign_key_issues}")
+    initialize_postgres_schema()

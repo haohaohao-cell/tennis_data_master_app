@@ -30,7 +30,7 @@ FastAPI /api/v1
   backend/app/messages/service.py
           │ 事务、权限、计数、序列号、通知事件
           ▼
-SQLite
+PostgreSQL (`public` schema)
   ├─ chat_conversations
   ├─ chat_conversation_members
   ├─ chat_messages
@@ -88,11 +88,11 @@ SQLite
 
 数据库脚本：`backend/db/social_message_schema.sql`
 
-SQLite 是当前开发和单实例部署的事实存储。所有时间字段使用服务端 UTC；所有业务主键使用 UUID 字符串；消息顺序使用会话内 `message_seq`，不能使用客户端时间排序作为权威顺序。
+PostgreSQL 是开发、测试和部署的事实存储。所有时间字段使用服务端 UTC；所有业务主键使用 UUID 字符串；消息顺序使用会话内 `message_seq`，不能使用客户端时间排序作为权威顺序。
 
-`backend/db/schema.sql` 是新 SQLite 数据库的完整基线，其中包含
+`backend/db/schema.sql` 是迁移工具读取的历史结构基线，其中包含
 `user_notification_preferences`。`backend/db/social_message_schema.sql` 是运行时对已有数据库执行的幂等消息升级，保留同一表定义以补齐旧库。执行
-`python scripts/init_sqlite_db.py --db <数据库路径>` 会调用该运行时升级路径；重复执行安全，完成后可用 `PRAGMA foreign_key_check` 验证。
+`python scripts/init_postgres_db.py --dsn <PostgreSQL DSN>` 会创建完整 PostgreSQL 结构；重复执行安全，迁移前后的校验由专用脚本完成。
 
 ## 4. 核心领域模型
 
@@ -269,7 +269,7 @@ PATCH /notifications/preferences
 - 消息历史按 `conversation_id + message_seq` 索引访问，默认单页不超过 100 条。
 - 附件批量 hydration，避免逐消息查询附件。
 - Post business object 卡片按消息页批量 hydration；发送者、回复和附件也必须保持固定数量查询增长。
-- 搜索优先使用索引；数据规模扩大后迁移 SQLite FTS5 或独立搜索服务。
+- 搜索优先使用 PostgreSQL 索引；数据规模扩大后迁移 PostgreSQL 全文检索或独立搜索服务。
 
 ### 可靠性
 
@@ -331,7 +331,7 @@ PATCH /notifications/preferences
 
 - `shared/api-schema/social-messages.md` 是跨端契约的权威文档。
 - 变更字段、枚举或计数语义时，同时更新 backend schemas、App API 类型、测试和本技术框架。
-- 数据库结构变更必须提供可执行迁移脚本，并说明 SQLite 现有数据兼容策略。
+- 数据库结构变更必须提供可执行 PostgreSQL 迁移脚本，并说明历史 SQLite 数据兼容策略。
 - SQLite 到 PostgreSQL 使用 `scripts/migrate_sqlite_to_postgres.py`，支持只读源、dry-run、分批重跑、冲突报告和导入后校验；原 SQLite 文件保留用于恢复和对比。
 - 消息序号、幂等键、未读计数、会话最后消息和消息媒体绑定继续在事务边界内更新；`chat_message_media` 与 Post/网球日记上传表保持隔离。
 - 新增用户可见页面、面板或弹层时同步更新 `docs/ui/UI_NAMING_REGISTRY.md`。
@@ -356,7 +356,7 @@ PATCH /notifications/preferences
 事务中写入 `message.created` Outbox 事件；事件写入失败则整体回滚。事件游标
 按 `(created_at, event_id)` 排序，多设备分别保存游标；历史消息继续按
 `message_seq` 补偿。领取使用租约字段，PostgreSQL 采用 `FOR UPDATE SKIP LOCKED`
-和事务级锁，SQLite 仅承诺本地写入互斥。当前不接入真实事件消费者。
+和事务级锁。当前不接入真实事件消费者。
 
 Push provider、WebSocket/SSE、消息反应、转发、输入状态、在线状态、
 端到端加密和复杂群治理仍未实现。

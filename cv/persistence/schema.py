@@ -1,4 +1,4 @@
-"""Initialize the full SQLite schema used by the tennis analysis system."""
+"""Initialize the full CV PostgreSQL schema used by the tennis analysis system."""
 
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ def rebuild_all_tables(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Initialize all SQLite tables.")
+    parser = argparse.ArgumentParser(description="Initialize all CV PostgreSQL tables.")
     parser.add_argument(
         "--db-path",
         type=Path,
         default=DEFAULT_DB_PATH,
-        help="Target SQLite database path.",
+        help="Deprecated compatibility path; PostgreSQL DSN comes from environment.",
     )
     parser.add_argument(
         "--rebuild",
@@ -56,7 +56,7 @@ def main() -> None:
         db_path = rebuild_all_tables(args.db_path)
     else:
         db_path = initialize_all_tables(args.db_path)
-    print(f"Full SQLite schema is ready: {db_path}")
+    print(f"Full CV PostgreSQL schema is ready (schema from environment); path ignored: {db_path}")
 
 
 if __name__ == "__main__":
