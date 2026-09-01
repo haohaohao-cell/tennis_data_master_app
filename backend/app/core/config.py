@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+DEVELOPMENT_MESSAGE_SYNC_CURSOR_SECRET = "development-message-sync-cursor-secret-change-me"
+DEVELOPMENT_MESSAGE_PUSH_TOKEN_KEY = "development-fake-push-token-key"
 
 
 def _parse_cors_origins(raw_value: str | None) -> list[str]:
@@ -51,6 +53,13 @@ class Settings:
             str(ROOT_DIR / "backend" / "storage" / "message_media"),
         )
     )
+    export_storage_dir: Path = Path(
+        os.getenv("TENNIS_EXPORT_STORAGE_DIR", str(ROOT_DIR / "backend" / "storage" / "exports"))
+    )
+    export_storage_provider: str = os.getenv("TENNIS_EXPORT_STORAGE_PROVIDER", "test_file")
+    export_storage_bucket: str | None = os.getenv("TENNIS_EXPORT_STORAGE_BUCKET")
+    realtime_dispatcher_provider: str = os.getenv("TENNIS_REALTIME_DISPATCHER_PROVIDER", "process_local")
+    instance_id: str | None = os.getenv("TENNIS_INSTANCE_ID")
     # PostgreSQL is the production authority when a DSN is configured. SQLite
     # remains available for local legacy-data reads and lightweight tests.
     database_url: str | None = os.getenv("TENNIS_DATABASE_URL") or os.getenv("TENNIS_POSTGRES_DSN")
@@ -58,6 +67,13 @@ class Settings:
     database_pool_max_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MAX_SIZE", "10"))
     database_connect_timeout_seconds: float = float(os.getenv("TENNIS_DATABASE_CONNECT_TIMEOUT_SECONDS", "5"))
     database_transaction_timeout_seconds: int = int(os.getenv("TENNIS_DATABASE_TRANSACTION_TIMEOUT_SECONDS", "30000"))
+    message_sync_cursor_secret: str | None = os.getenv("TENNIS_MESSAGE_SYNC_CURSOR_SECRET")
+    message_sync_retention_days: int = int(os.getenv("TENNIS_MESSAGE_SYNC_RETENTION_DAYS", "30"))
+    message_push_enabled: bool = os.getenv("MESSAGE_PUSH_ENABLED", "false").lower() == "true"
+    message_push_fake_provider_enabled: bool = os.getenv("MESSAGE_PUSH_FAKE_PROVIDER_ENABLED", "false").lower() == "true"
+    message_push_token_registration_enabled: bool = os.getenv("MESSAGE_PUSH_TOKEN_REGISTRATION_ENABLED", "false").lower() == "true"
+    message_push_token_key: str = os.getenv("MESSAGE_PUSH_TOKEN_KEY", DEVELOPMENT_MESSAGE_PUSH_TOKEN_KEY)
+    message_push_max_attempts: int = int(os.getenv("MESSAGE_PUSH_MAX_ATTEMPTS", "3"))
     max_message_image_size_bytes: int = int(
         os.getenv("TENNIS_MAX_MESSAGE_IMAGE_SIZE_BYTES", str(15 * 1024 * 1024))
     )
@@ -104,6 +120,40 @@ class Settings:
     @property
     def uses_postgres(self) -> bool:
         return bool(self.database_url)
+
+    def resolved_message_sync_cursor_secret(self) -> str:
+        """Require an explicit cursor signing secret outside local development."""
+        configured = (self.message_sync_cursor_secret or "").strip()
+        if configured:
+            return configured
+        if self.is_development:
+            return DEVELOPMENT_MESSAGE_SYNC_CURSOR_SECRET
+        raise RuntimeError(
+            "TENNIS_MESSAGE_SYNC_CURSOR_SECRET must be configured outside development."
+        )
+
+    def validate_message_sync_configuration(self) -> None:
+        self.resolved_message_sync_cursor_secret()
+
+    def validate_runtime_configuration(self) -> None:
+        """Reject development-only secrets and permissive CORS outside local runs."""
+        self.resolved_message_sync_cursor_secret()
+        if self.is_development:
+            return
+        if self.cors_origins == ["*"]:
+            raise RuntimeError("TENNIS_CORS_ORIGINS must explicitly list production origins.")
+        if not self.message_push_token_key or self.message_push_token_key == DEVELOPMENT_MESSAGE_PUSH_TOKEN_KEY:
+            raise RuntimeError("MESSAGE_PUSH_TOKEN_KEY must be configured outside development.")
+        if self.message_push_fake_provider_enabled:
+            raise RuntimeError("MESSAGE_PUSH_FAKE_PROVIDER_ENABLED cannot be enabled outside development.")
+        if self.export_storage_provider == "test_file":
+            raise RuntimeError("TENNIS_EXPORT_STORAGE_PROVIDER must not use test_file outside development.")
+        if self.export_storage_provider != "external_contract" or not self.export_storage_bucket:
+            raise RuntimeError("Production export storage must declare an external storage contract and bucket.")
+        if self.realtime_dispatcher_provider != "process_local":
+            raise RuntimeError("Unsupported realtime dispatcher provider.")
+        if not (self.instance_id or "").strip():
+            raise RuntimeError("TENNIS_INSTANCE_ID must be configured outside development.")
 
 
 settings = Settings()

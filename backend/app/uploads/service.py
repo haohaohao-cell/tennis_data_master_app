@@ -21,6 +21,7 @@ from backend.app.uploads.schemas import (
     ActivityDetailLesson,
     ActivityDetailPermissions,
     ActivityDetailResponse,
+    ActivityDeleteResponse,
     ActivityDetailSummary,
     LessonOption,
     TennisActivityCreate,
@@ -981,6 +982,43 @@ def cancel_activity_upload(user_id: str, tennis_activity_id: str) -> UploadCance
             ).fetchall()
         ]
         return UploadCancelResponse(success=True, activity=activity, videos=videos)
+
+
+def delete_activity(user_id: str, tennis_activity_id: str) -> ActivityDeleteResponse:
+    """Soft-delete an owned activity without deleting independent post/media history.
+
+    Videos and their Post media can have independent downstream references, so
+    this user action hides the activity and removes authored Post source links
+    rather than deleting files, messages, analysis, or Posts.
+    """
+    now = utc_now_iso()
+    with transaction() as connection:
+        _select_owned_activity(connection, tennis_activity_id, user_id)
+        connection.execute(
+            """
+            UPDATE tennis_activities
+            SET deleted_at = ?
+            WHERE tennis_activity_id = ?
+              AND owner_user_id = ?
+              AND deleted_at IS NULL;
+            """,
+            (now, tennis_activity_id, user_id),
+        )
+        # Matches the schema's hard-delete FK behavior while preserving posts.
+        connection.execute(
+            """
+            UPDATE social_posts
+            SET source_tennis_activity_id = NULL
+            WHERE source_tennis_activity_id = ?
+              AND author_user_id = ?;
+            """,
+            (tennis_activity_id, user_id),
+        )
+    return ActivityDeleteResponse(
+        success=True,
+        tennis_activity_id=tennis_activity_id,
+        deleted_at=now,
+    )
 
 
 def get_activity_detail(user_id: str, tennis_activity_id: str) -> ActivityDetailResponse:
