@@ -10,9 +10,9 @@ async def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         os.environ["TENNIS_DB_PATH"] = str(Path(temp_dir) / "stage14b.sqlite3")
         os.environ.pop("TENNIS_DATABASE_URL", None); os.environ.pop("TENNIS_POSTGRES_DSN", None)
-        from backend.app.core.database import get_connection, initialize_database, transaction
+        from backend.app.core.database import get_connection, initialize_sqlite_database, transaction
         from backend.app.main import app
-        initialize_database()
+        initialize_sqlite_database()
         (admin_token, admin_id), (reporter_token, reporter_id), (outsider_token, outsider_id) = [await login_phone(app, p) for p in ("13956000001", "13956000002", "13956000003")]
         with transaction() as connection:
             connection.execute("INSERT INTO admin_users (admin_user_id, user_id, role, status) VALUES ('stage14b-admin', ?, 'operator', 'active');", (admin_id,))

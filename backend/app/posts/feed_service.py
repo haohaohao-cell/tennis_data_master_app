@@ -773,7 +773,7 @@ def report_views(user_id: str, payload: PostViewsBulkCreate) -> PostViewsBulkRes
         for retry_delay in (*REPORT_VIEW_LOCK_RETRY_DELAYS_SECONDS, None):
             try:
                 now = utc_now_iso()
-                with transaction(immediate=True) as connection:
+                with transaction(immediate=True, lock_key=f"post-views:{user_id}") as connection:
                     for item in accepted_items:
                         connection.execute(
                             """

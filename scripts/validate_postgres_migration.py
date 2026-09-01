@@ -17,13 +17,18 @@ sys.path.insert(0, str(ROOT_DIR))
 from scripts.migrate_sqlite_to_postgres import PREFERRED_ORDER, source_tables, table_columns
 
 EXPECTED_POSTGRES_TABLES = {
-    "users", "auth_sessions", "user_blocks", "user_privacy_settings",
-    "user_notification_preferences", "chat_conversations", "chat_conversation_members",
-    "chat_messages", "chat_message_attachments", "chat_message_media",
-    "outbox_events",
-    "chat_message_requests", "notification_events", "user_notifications",
-    "user_inbox_counters", "post_shares", "social_posts", "post_media", "videos",
-    "tennis_activities", "lessons",
+    "users", "admin_users", "admin_credentials", "auth_identities",
+    "auth_sessions", "auth_verification_codes", "coach_applications",
+    "coach_profiles", "lessons", "lesson_students", "tennis_activities",
+    "videos", "video_shares", "social_posts", "social_post_stats",
+    "post_reactions", "post_favorites", "post_comments", "post_media",
+    "user_follows", "user_social_stats", "user_blocks",
+    "user_privacy_settings", "user_notification_preferences", "user_post_views",
+    "user_post_hides", "chat_conversations", "chat_conversation_members",
+    "chat_messages", "outbox_events", "chat_message_media",
+    "chat_message_attachments", "chat_message_requests", "post_shares",
+    "notification_events", "user_notifications", "user_inbox_counters",
+    "content_reports", "points", "shots",
 }
 
 

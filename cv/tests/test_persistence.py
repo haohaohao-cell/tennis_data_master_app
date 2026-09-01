@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,11 +8,17 @@ from cv.scripts.db_operations import TennisAnalysisRepository as PublicRepositor
 
 
 class RepositoryTest(unittest.TestCase):
+    @unittest.skipUnless(
+        os.getenv("TENNIS_CV_DATABASE_URL")
+        or os.getenv("TENNIS_DATABASE_URL")
+        or os.getenv("TENNIS_POSTGRES_DSN"),
+        "PostgreSQL DSN is required for the persistence round-trip test",
+    )
     def test_public_repository_path_and_bundle_round_trip(self) -> None:
         self.assertIs(PublicRepository, TennisAnalysisRepository)
 
         with tempfile.TemporaryDirectory() as directory:
-            repository = TennisAnalysisRepository(Path(directory) / "analysis.sqlite")
+            repository = TennisAnalysisRepository(Path(directory) / "analysis.postgres")
             bundle = repository.save_upload_analysis_bundle(
                 upload_row={
                     "upload_id": "upload_1",

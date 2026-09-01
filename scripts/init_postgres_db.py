@@ -17,6 +17,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Initialize the configured PostgreSQL database.")
     parser.add_argument("--dsn", help="PostgreSQL DSN; defaults to TENNIS_DATABASE_URL/TENNIS_POSTGRES_DSN")
     parser.add_argument("--schema", default="public", help="Explicit target schema (default: public).")
+    parser.add_argument(
+        "--cv-schema",
+        default="cv_analysis",
+        help="CV analysis schema (default: cv_analysis); set empty to skip CV tables.",
+    )
     parser.add_argument("--render", type=Path, help="Write the rendered schema SQL to this path without connecting.")
     args = parser.parse_args()
     schema = render_postgres_schema(schema=args.schema)
@@ -25,18 +30,26 @@ def main() -> None:
         args.render.write_text(schema, encoding="utf-8")
         print(f"Rendered PostgreSQL schema: {args.render.resolve()}")
         return
-    if args.dsn:
+    dsn = args.dsn
+    if dsn:
         import os
         os.environ["TENNIS_DATABASE_URL"] = args.dsn
         # Settings is imported by the adapter at module load, so a CLI DSN is
         # passed through before opening the connection only for this command.
         from backend.app.core import config
-        object.__setattr__(config.settings, "database_url", args.dsn)
+        object.__setattr__(config.settings, "database_url", dsn)
+    else:
+        import os
+        dsn = os.getenv("TENNIS_DATABASE_URL") or os.getenv("TENNIS_POSTGRES_DSN")
     try:
         with connection() as db:
             db.raw.execute(schema)
             db.raw.commit()
-        print("PostgreSQL schema initialized.")
+        if args.cv_schema:
+            from cv.persistence.postgres import initialize_schema as initialize_cv_schema
+
+            initialize_cv_schema(dsn=dsn, schema=args.cv_schema)
+        print(f"PostgreSQL schema initialized (backend {args.schema} + CV {args.cv_schema or 'skipped'}).")
     finally:
         close_pool()
 

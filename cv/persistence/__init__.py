@@ -1,4 +1,4 @@
-"""SQLite schema and repository APIs."""
+"""PostgreSQL schema and repository APIs."""
 
 from .repository import TennisAnalysisRepository
 

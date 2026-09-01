@@ -39,10 +39,10 @@ async def main() -> None:
         if postgres_schema:
             from backend.app.core import config
             object.__setattr__(config.settings, "database_url", os.environ["TENNIS_DATABASE_URL"])
-        from backend.app.core.database import get_connection, initialize_database
+        from backend.app.core.database import get_connection, initialize_database, initialize_sqlite_database
         from backend.app.main import app
 
-        initialize_database()
+        (initialize_database if postgres_schema else initialize_sqlite_database)()
         accounts = [await login_phone(app, phone) for phone in ("13948000001", "13948000002", "13948000003", "13948000004")]
         (alice_token, alice_id), (bob_token, bob_id), (carol_token, carol_id), (dave_token, dave_id) = accounts
         alice, bob, carol, dave = ({"authorization": f"Bearer {token}"} for token, _ in accounts)

@@ -123,8 +123,8 @@ def _select_activities(
         f"""
         SELECT
             tennis_activities.*,
-            COUNT(videos.video_id) AS video_count,
-            SUM(CASE WHEN videos.upload_status = 'uploaded' THEN 1 ELSE 0 END) AS uploaded_video_count,
+            COALESCE(video_counts.video_count, 0) AS video_count,
+            COALESCE(video_counts.uploaded_video_count, 0) AS uploaded_video_count,
             first_video.video_id AS first_video_id,
             first_video.original_filename AS first_original_filename,
             first_video.video_path AS first_video_path,
@@ -136,8 +136,15 @@ def _select_activities(
             first_video.uploaded_at AS first_uploaded_at,
             first_video.created_at AS first_video_created_at
         FROM tennis_activities
-        LEFT JOIN videos ON videos.tennis_activity_id = tennis_activities.tennis_activity_id
-            AND videos.deleted_at IS NULL
+        LEFT JOIN (
+            SELECT
+                tennis_activity_id,
+                COUNT(*) AS video_count,
+                SUM(CASE WHEN upload_status = 'uploaded' THEN 1 ELSE 0 END) AS uploaded_video_count
+            FROM videos
+            WHERE deleted_at IS NULL
+            GROUP BY tennis_activity_id
+        ) AS video_counts ON video_counts.tennis_activity_id = tennis_activities.tennis_activity_id
         LEFT JOIN videos AS first_video ON first_video.video_id = (
             SELECT inner_videos.video_id
             FROM videos AS inner_videos
@@ -149,7 +156,6 @@ def _select_activities(
         WHERE tennis_activities.owner_user_id = ?
           AND tennis_activities.activity_type {comparator} 'match'
           AND tennis_activities.deleted_at IS NULL
-        GROUP BY tennis_activities.tennis_activity_id
         ORDER BY
             COALESCE(tennis_activities.started_at, tennis_activities.created_at) DESC,
             tennis_activities.created_at DESC,
@@ -166,7 +172,7 @@ def _select_posts(connection: sqlite3.Connection, user_id: str) -> list[ProfileC
         """
         SELECT
             social_posts.*,
-            COUNT(post_media.post_media_id) AS media_count,
+            COALESCE(media_counts.media_count, 0) AS media_count,
             first_media.media_type AS first_media_type,
             first_media.image_path AS first_image_path,
             first_media_video.video_id AS first_video_id,
@@ -174,8 +180,12 @@ def _select_posts(connection: sqlite3.Connection, user_id: str) -> list[ProfileC
             first_media_video.thumbnail_path AS first_video_thumbnail_path,
             first_media_video.upload_status AS first_video_upload_status
         FROM social_posts
-        LEFT JOIN post_media ON post_media.social_post_id = social_posts.social_post_id
-            AND post_media.deleted_at IS NULL
+        LEFT JOIN (
+            SELECT social_post_id, COUNT(*) AS media_count
+            FROM post_media
+            WHERE deleted_at IS NULL
+            GROUP BY social_post_id
+        ) AS media_counts ON media_counts.social_post_id = social_posts.social_post_id
         LEFT JOIN post_media AS first_media ON first_media.post_media_id = (
             SELECT inner_media.post_media_id
             FROM post_media AS inner_media
@@ -188,7 +198,6 @@ def _select_posts(connection: sqlite3.Connection, user_id: str) -> list[ProfileC
         WHERE social_posts.author_user_id = ?
           AND social_posts.deleted_at IS NULL
           AND social_posts.status <> 'deleted'
-        GROUP BY social_posts.social_post_id
         ORDER BY
             COALESCE(social_posts.published_at, social_posts.created_at) DESC,
             social_posts.created_at DESC,

@@ -898,7 +898,10 @@ def create_group_conversation(
     payload: GroupConversationCreate,
 ) -> ConversationCreateResponse:
     member_ids = list(dict.fromkeys([user_id, *payload.member_user_ids]))
-    with transaction(immediate=True) as connection:
+    with transaction(
+        immediate=True,
+        lock_key=f"group-conversation:{user_id}:{','.join(sorted(member_ids))}",
+    ) as connection:
         _ensure_active_user(connection, user_id)
         for member_id in member_ids:
             _ensure_active_user(connection, member_id)
@@ -2706,7 +2709,7 @@ def list_message_requests(
 
 
 def accept_message_request(user_id: str, message_request_id: str) -> MessageRequestActionResponse:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"message-request:{message_request_id}") as connection:
         _ensure_active_user(connection, user_id)
         row = _select_message_request(connection, message_request_id)
         if row["recipient_user_id"] != user_id or row["status"] != "pending":
@@ -2746,7 +2749,7 @@ def accept_message_request(user_id: str, message_request_id: str) -> MessageRequ
 
 
 def decline_message_request(user_id: str, message_request_id: str) -> MessageRequestActionResponse:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"message-request:{message_request_id}") as connection:
         _ensure_active_user(connection, user_id)
         row = _select_message_request(connection, message_request_id)
         if row["recipient_user_id"] != user_id or row["status"] != "pending":
@@ -3068,7 +3071,7 @@ def mark_conversation_read(
     payload: MarkReadRequest | None = None,
 ) -> MarkReadResponse:
     event_id = None
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"conversation-read:{conversation_id}:{user_id}") as connection:
         _ensure_active_user(connection, user_id)
         conversation = _select_conversation(connection, conversation_id)
         member = _select_member(connection, conversation_id, user_id)
@@ -3473,7 +3476,7 @@ def list_notifications(
 
 
 def mark_notification_read(user_id: str, user_notification_id: str) -> bool:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"notification:{user_notification_id}:{user_id}") as connection:
         _ensure_active_user(connection, user_id)
         row = connection.execute(
             """
@@ -3504,7 +3507,7 @@ def mark_notification_read(user_id: str, user_notification_id: str) -> bool:
 
 
 def mark_all_notifications_read(user_id: str) -> int:
-    with transaction(immediate=True) as connection:
+    with transaction(immediate=True, lock_key=f"notifications:{user_id}") as connection:
         _ensure_active_user(connection, user_id)
         result = connection.execute(
             """

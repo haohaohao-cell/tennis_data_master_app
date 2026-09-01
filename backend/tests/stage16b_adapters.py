@@ -46,7 +46,7 @@ def main() -> None:
         os.environ.pop("TENNIS_POSTGRES_DSN", None)
         from backend.app.core import config
         from backend.app.compliance.export_storage import TestFileExportStorage
-        from backend.app.core.database import initialize_database, transaction
+        from backend.app.core.database import initialize_sqlite_database, transaction
         from backend.app.messages.realtime import RealtimeRegistry
 
         storage = TestFileExportStorage(Path(temp_dir) / "exports")
@@ -56,7 +56,7 @@ def main() -> None:
         assert not storage.exists_export("../escape.json")
         assert storage.delete_export(key) and not storage.exists_export(key)
 
-        initialize_database()
+        initialize_sqlite_database()
         with transaction() as connection:
             connection.execute("INSERT INTO users (user_id, phone, nickname) VALUES ('stage16b-user', '13916660001', 'Stage 16B');")
             connection.execute("INSERT INTO user_sync_events (user_sync_event_id, event_id, event_type, aggregate_type, aggregate_id, recipient_user_id, occurred_at, persisted_at, payload_json) VALUES ('stage16b-event-row', 'stage16b-event', 'message.created', 'chat_message', 'stage16b-message', 'stage16b-user', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{}');")

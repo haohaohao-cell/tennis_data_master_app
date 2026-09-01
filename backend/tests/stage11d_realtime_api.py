@@ -115,6 +115,9 @@ def main() -> None:
             assert temporary_directory is not None
             object.__setattr__(config.settings, "database_url", None)
             object.__setattr__(config.settings, "database_path", Path(temporary_directory.name) / "fixture.sqlite3")
+            from backend.app.core import database
+
+            database.initialize_sqlite_database()
         from backend.app.main import app
         from backend.app.messages import realtime
 

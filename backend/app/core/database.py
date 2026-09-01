@@ -8,6 +8,12 @@ from .config import settings
 from . import postgres
 
 
+# Runtime requests always use PostgreSQL. This process-local switch exists only
+# for test scripts and one-time legacy tooling that explicitly initialize a
+# disposable SQLite database before importing the application.
+_sqlite_legacy_mode = False
+
+
 AUTH_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS auth_identities (
     identity_id TEXT PRIMARY KEY,
@@ -387,7 +393,7 @@ END;
 
 
 def _connect() -> sqlite3.Connection:
-    if settings.uses_postgres:
+    if settings.uses_postgres and not _sqlite_legacy_mode:
         # PostgreSQL connections are owned by the adapter; the return type is
         # intentionally duck-typed so existing services keep one API.
         return postgres._open_raw()  # type: ignore[return-value]
@@ -405,7 +411,7 @@ def _connect() -> sqlite3.Connection:
 
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
-    if settings.uses_postgres:
+    if settings.uses_postgres and not _sqlite_legacy_mode:
         with postgres.connection() as connection:
             yield connection  # type: ignore[misc]
         return
@@ -418,7 +424,7 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 @contextmanager
 def transaction(*, immediate: bool = False, lock_key: str | None = None) -> Iterator[sqlite3.Connection]:
-    if settings.uses_postgres:
+    if settings.uses_postgres and not _sqlite_legacy_mode:
         with postgres.transaction(immediate=immediate, lock_key=lock_key) as connection:
             yield connection  # type: ignore[misc]
         return
@@ -436,7 +442,7 @@ def transaction(*, immediate: bool = False, lock_key: str | None = None) -> Iter
 
 def advisory_lock(connection: sqlite3.Connection, lock_key: str) -> None:
     """Use PostgreSQL advisory locks when the current transaction supports them."""
-    if settings.uses_postgres:
+    if settings.uses_postgres and not _sqlite_legacy_mode:
         postgres.advisory_lock(connection, lock_key)  # type: ignore[arg-type]
 
 
@@ -1355,12 +1361,8 @@ def _run_stage14d_migrations(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_user_sync_events_recipient_cursor ON user_sync_events(recipient_user_id, persisted_at, event_id);
         CREATE INDEX IF NOT EXISTS idx_user_sync_events_conversation ON user_sync_events(conversation_id, persisted_at, event_id);
     """)
-def initialize_database() -> None:
-    if settings.uses_postgres:
-        from .postgres_schema import initialize_postgres_schema
-
-        initialize_postgres_schema()
-        return
+def _initialize_sqlite_database() -> None:
+    """Initialize or upgrade the explicit SQLite legacy/test database."""
     schema_sql = settings.schema_path.read_text(encoding="utf-8")
     social_message_schema_path = settings.schema_path.parent / "social_message_schema.sql"
     social_message_schema_sql = social_message_schema_path.read_text(encoding="utf-8")
@@ -1405,3 +1407,20 @@ def initialize_database() -> None:
         foreign_key_issues = list(connection.execute("PRAGMA foreign_key_check;"))
         if foreign_key_issues:
             raise RuntimeError(f"Foreign key check failed: {foreign_key_issues}")
+
+
+def initialize_sqlite_database() -> None:
+    """Explicitly enable SQLite only for a disposable test or legacy-tool process."""
+    global _sqlite_legacy_mode
+    _sqlite_legacy_mode = True
+    _initialize_sqlite_database()
+
+
+def initialize_database() -> None:
+    """Initialize the PostgreSQL runtime schema, or explicit SQLite test tooling."""
+    if _sqlite_legacy_mode:
+        _initialize_sqlite_database()
+        return
+    from .postgres_schema import initialize_postgres_schema
+
+    initialize_postgres_schema()

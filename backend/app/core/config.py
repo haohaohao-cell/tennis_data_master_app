@@ -60,8 +60,8 @@ class Settings:
     export_storage_bucket: str | None = os.getenv("TENNIS_EXPORT_STORAGE_BUCKET")
     realtime_dispatcher_provider: str = os.getenv("TENNIS_REALTIME_DISPATCHER_PROVIDER", "process_local")
     instance_id: str | None = os.getenv("TENNIS_INSTANCE_ID")
-    # PostgreSQL is the production authority when a DSN is configured. SQLite
-    # remains available for local legacy-data reads and lightweight tests.
+    # PostgreSQL is the only runtime database. SQLite helpers remain available
+    # only to explicit legacy migration and temporary test tooling.
     database_url: str | None = os.getenv("TENNIS_DATABASE_URL") or os.getenv("TENNIS_POSTGRES_DSN")
     database_pool_min_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MIN_SIZE", "1"))
     database_pool_max_size: int = int(os.getenv("TENNIS_DATABASE_POOL_MAX_SIZE", "10"))
@@ -119,7 +119,10 @@ class Settings:
 
     @property
     def uses_postgres(self) -> bool:
-        return bool(self.database_url)
+        # Keep one database contract across every backend module. A missing
+        # DSN is reported by the PostgreSQL adapter instead of silently
+        # creating a local SQLite file.
+        return True
 
     def resolved_message_sync_cursor_secret(self) -> str:
         """Require an explicit cursor signing secret outside local development."""

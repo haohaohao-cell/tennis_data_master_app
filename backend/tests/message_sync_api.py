@@ -20,12 +20,12 @@ async def main() -> None:
         os.environ.pop("TENNIS_POSTGRES_DSN", None)
         os.environ["TENNIS_DB_PATH"] = str(Path(temp_dir) / "message_sync_api.sqlite3")
 
-        from backend.app.core.database import get_connection, initialize_database
+        from backend.app.core.database import get_connection, initialize_sqlite_database
         from backend.app.main import app
         from backend.app.messages import sync as sync_service
 
-        initialize_database()
-        initialize_database()
+        initialize_sqlite_database()
+        initialize_sqlite_database()
 
         (alice_token, alice_id), (bob_token, bob_id), (carol_token, carol_id) = await asyncio.gather(
             login_phone(app, "13970000001"),

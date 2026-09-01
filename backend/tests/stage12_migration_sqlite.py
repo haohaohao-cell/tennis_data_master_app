@@ -14,8 +14,8 @@ def main() -> None:
         os.environ.pop("TENNIS_DATABASE_URL", None)
         os.environ.pop("TENNIS_POSTGRES_DSN", None)
         os.environ["TENNIS_DB_PATH"] = str(Path(directory) / "legacy.sqlite3")
-        from backend.app.core.database import get_connection, initialize_database, transaction, _run_stage12_message_migrations
-        initialize_database()
+        from backend.app.core.database import get_connection, initialize_sqlite_database, transaction, _run_stage12_message_migrations
+        initialize_sqlite_database()
         with transaction() as connection:
             connection.execute("INSERT INTO users (user_id, phone, nickname) VALUES ('u1','13949000001','Legacy');")
             connection.execute("INSERT INTO chat_conversations (conversation_id, conversation_type, direct_pair_key, created_by_user_id) VALUES ('c1','direct','u1:u1','u1');")

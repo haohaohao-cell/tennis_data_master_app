@@ -38,12 +38,12 @@ async def main() -> None:
             os.environ.pop("TENNIS_POSTGRES_DSN", None)
 
         from backend.app.core import config
-        from backend.app.core.database import get_connection, initialize_database, transaction
+        from backend.app.core.database import get_connection, initialize_database, initialize_sqlite_database, transaction
         from backend.app.main import app
 
         if postgres_schema:
             object.__setattr__(config.settings, "database_url", os.environ["TENNIS_DATABASE_URL"])
-        initialize_database()
+        (initialize_database if postgres_schema else initialize_sqlite_database)()
         accounts = [await login_phone(app, phone) for phone in ("13954000001", "13954000002", "13954000003")]
         (alice_token, alice_id), (bob_token, bob_id), (carol_token, carol_id) = accounts
         alice = {"authorization": f"Bearer {alice_token}"}

@@ -1,4 +1,4 @@
-"""Shot-level SQLite schema helpers.
+"""Shot-level PostgreSQL schema helpers.
 
 This module only initializes the shot table for now.
 Future extraction can read `match_frames.json` plus the net-hit subset from
@@ -91,17 +91,17 @@ def create_shots_table(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create the SQLite shots table.")
+    parser = argparse.ArgumentParser(description="Create the CV PostgreSQL shots table.")
     parser.add_argument(
         "--db-path",
         type=Path,
         default=DEFAULT_DB_PATH,
-        help="Target SQLite database path.",
+        help="Deprecated compatibility path; PostgreSQL DSN comes from environment.",
     )
     args = parser.parse_args()
 
     db_path = create_shots_table(args.db_path)
-    print(f"SQLite shots table is ready: {db_path}")
+    print(f"CV PostgreSQL shots table is ready (schema from environment); path ignored: {db_path}")
 
 
 if __name__ == "__main__":

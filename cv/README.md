@@ -32,7 +32,7 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 | [`court`](court/README.md) | 球场检测、参考系、单应变换和坐标映射 |
 | [`events`](events/README.md) | 击球、发球、出界和触网检测 |
 | [`analytics`](analytics/README.md) | rally、球速和跑动距离统计 |
-| [`persistence`](persistence/README.md) | SQLite schema、连接和 repository |
+| [`persistence`](persistence/README.md) | PostgreSQL schema、连接和 repository |
 | [`visualization`](visualization/README.md) | 视频标注、minimap 和统计绘制 |
 | [`io`](io/README.md) | 视频与 JSON 读写 |
 | [`models`](models/README.md) | 模型实现与本地权重 |

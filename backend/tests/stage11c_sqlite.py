@@ -22,7 +22,7 @@ def main() -> None:
         object.__setattr__(config.settings, "message_push_enabled", True)
         object.__setattr__(config.settings, "message_push_fake_provider_enabled", True)
         object.__setattr__(config.settings, "message_push_token_registration_enabled", True)
-        database.initialize_database()
+        database.initialize_sqlite_database()
         with database.transaction() as connection:
             connection.execute("INSERT INTO users (user_id, phone, nickname) VALUES (?, ?, ?);", ("u-stage11c", "13900000001", "Stage 11C"))
 

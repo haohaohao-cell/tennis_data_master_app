@@ -88,14 +88,66 @@ def _topological_order(blocks: list[tuple[str, str]]) -> list[str]:
 
 def _strip_sqlite_triggers(sql: str) -> tuple[str, list[tuple[str, str]]]:
     trigger_pattern = re.compile(
-        r"CREATE TRIGGER IF NOT EXISTS\s+(\w+)\s+.*?\bON\s+(\w+)\s+.*?END\s*;",
+        r"CREATE TRIGGER IF NOT EXISTS\s+(\w+)\s+.*?\bON\s+(\w+)\b",
         re.IGNORECASE | re.DOTALL,
     )
+
+    def trigger_end(source: str, start: int) -> int:
+        """Find the outer trigger END, including nested CASE ... END blocks."""
+        begin = re.search(r"\bBEGIN\b", source[start:], re.IGNORECASE)
+        if begin is None:
+            raise ValueError("SQLite trigger has no BEGIN block")
+        index = start + begin.end()
+        depth = 1
+        quote: str | None = None
+        while index < len(source):
+            char = source[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(source) and source[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+                index += 1
+                continue
+            if char in {"'", '"'}:
+                quote = char
+                index += 1
+                continue
+            token = re.match(r"\b(BEGIN|CASE|END)\b", source[index:], re.IGNORECASE)
+            if token:
+                if token.group(1).upper() in {"BEGIN", "CASE"}:
+                    depth += 1
+                else:
+                    depth -= 1
+                    if depth == 0:
+                        semicolon = source.find(";", index + token.end())
+                        if semicolon < 0:
+                            raise ValueError("SQLite trigger has no terminating semicolon")
+                        return semicolon + 1
+                index += token.end()
+                continue
+            index += 1
+        raise ValueError("unterminated SQLite trigger block")
+
     updated: list[tuple[str, str]] = []
-    for match in trigger_pattern.finditer(sql):
+    spans: list[tuple[int, int]] = []
+    search_at = 0
+    while match := trigger_pattern.search(sql, search_at):
         if "set_updated_at" in match.group(1).lower():
             updated.append((match.group(1), match.group(2)))
-    return trigger_pattern.sub("", sql), updated
+        end = trigger_end(sql, match.start())
+        spans.append((match.start(), end))
+        search_at = end
+    if not spans:
+        return sql, updated
+    parts: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        parts.append(sql[cursor:start])
+        cursor = end
+    parts.append(sql[cursor:])
+    return "".join(parts), updated
 
 
 def render_postgres_schema(source_paths: Iterable[Path] | None = None, schema: str | None = None) -> str:
@@ -279,8 +331,18 @@ END $$;
 
 
 def initialize_postgres_schema(schema: str | None = None) -> None:
+    if not settings.database_url:
+        raise RuntimeError(
+            "TENNIS_DATABASE_URL (or TENNIS_POSTGRES_DSN) must be configured "
+            "before initializing PostgreSQL."
+        )
     schema_sql = render_postgres_schema(schema=schema)
-    import psycopg
+    try:
+        import psycopg
+    except ImportError as error:
+        raise RuntimeError(
+            "PostgreSQL is configured but psycopg is not installed; install backend/requirements.txt."
+        ) from error
 
     try:
         # Schema setup is a one-shot operation. Use a dedicated raw
@@ -292,10 +354,12 @@ def initialize_postgres_schema(schema: str | None = None) -> None:
         ) as connection:
             connection.execute(schema_sql)
             connection.commit()
+            target_schema = schema or "public"
             table_count = connection.execute(
-                "SELECT COUNT(*) FROM pg_tables WHERE schemaname = current_schema()"
+                "SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s",
+                (target_schema,),
             ).fetchone()[0]
-            if int(table_count) < 39:
+            if int(table_count) < 40:
                 raise RuntimeError(
                     f"PostgreSQL schema initialization incomplete: {table_count} tables in current schema"
                 )

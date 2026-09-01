@@ -574,9 +574,9 @@ Post sharing does not implement or reuse Post or tennis-diary upload APIs.
 The API contract is unchanged when the backend uses PostgreSQL. String IDs,
 timestamp response formats, message sequence numbers, idempotency conflict
 codes, unread counts, object-card availability states, and message-media
-authorization remain compatible with the SQLite baseline. PostgreSQL is the
-production write authority when `TENNIS_DATABASE_URL` is configured; SQLite is
-retained only for legacy migration input and lightweight tests.
+authorization remain compatible with the historical SQLite baseline. PostgreSQL
+is the only runtime write authority; SQLite is retained only as a read-only
+legacy migration input.
 
 ## Query boundary
 
@@ -584,8 +584,8 @@ History, message search, and reconcile preserve `conversation_id` plus
 `message_seq` cursor semantics. Their Post `business_object_card` hydration is
 page-bounded: Post rows, access relationships, and cover media are loaded in
 batch, while unsupported object types remain `unsupported` and database
-failures are not converted to `unavailable`. SQLite performance evidence is
-reported separately from PostgreSQL evidence.
+failures are not converted to `unavailable`. Performance evidence is reported
+with the target PostgreSQL environment and migration provenance.
 
 ## Offline send and durable events
 
@@ -613,7 +613,7 @@ auth, permission, validation, conflict, and expired-media errors are permanent.
 
 Future consumers may claim events with `leased_at`, `lease_owner`,
 `attempt_count`, and `next_attempt_at`; PostgreSQL uses `FOR UPDATE SKIP LOCKED`
-and SQLite provides only local single-writer serialization. Acknowledgement is
+and row-level locking. Acknowledgement is
 lease-owner scoped and processing must be idempotent by `event_id`. This does
 not implement Push, WebSocket, or SSE delivery.
 

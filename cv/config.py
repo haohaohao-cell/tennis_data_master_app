@@ -20,7 +20,9 @@ DEFAULT_GRIDTRACKNET_MODEL_PATH = Path(
 )
 DEFAULT_PLAYER_MODEL_PATH = WEIGHTS_DIR / "yolov8m.pt"
 DEFAULT_COURT_MODEL_PATH = WEIGHTS_DIR / "model_tennis_court_det.pt"
-DEFAULT_DB_PATH = OUTPUT_DIR / "match_analysis.sqlite"
+# Kept as a source-compatible placeholder for repository constructors. CV
+# persistence now uses PostgreSQL and never opens this path.
+DEFAULT_DB_PATH = OUTPUT_DIR / "match_analysis.postgres"
 
 
 def ensure_runtime_directories() -> None:

@@ -1,10 +1,8 @@
 # PostgreSQL Migration
 
-PostgreSQL is the production authority once `TENNIS_DATABASE_URL` (or the
-compatibility alias `TENNIS_POSTGRES_DSN`) is configured. SQLite remains only
-for local legacy-data reads, this repository's lightweight tests, and the
-source of the non-destructive transfer tool. Production must not split writes
-between the two databases.
+PostgreSQL is the only application database. SQLite is retained solely as a
+read-only source for the one-time non-destructive transfer tool; production and
+CV processing never open SQLite.
 
 ## Setup
 
@@ -14,9 +12,10 @@ Install the backend dependencies, set a DSN, and initialize the schema:
 pip install -r backend/requirements.txt
 $env:TENNIS_DATABASE_HOST = "localhost"
 $env:TENNIS_DATABASE_PORT = "5432"
-$env:TENNIS_DATABASE_NAME = "tennis_messages_test"
-# Set TENNIS_DATABASE_URL in this same PowerShell process; do not commit it.
-python scripts/init_postgres_db.py
+$env:TENNIS_DATABASE_NAME = "tennis_data_master"
+$env:TENNIS_DATABASE_URL = "postgresql://postgres@localhost:5432/tennis_data_master"
+# Use your local PostgreSQL user/password as appropriate; do not commit the DSN.
+python scripts/init_postgres_db.py  # backend public + CV cv_analysis schemas
 ```
 
 The generated schema is also checked in at
@@ -34,6 +33,9 @@ python scripts/migrate_sqlite_to_postgres.py --sqlite backend/db/tennis_data_mas
 python scripts/migrate_sqlite_to_postgres.py --sqlite backend/db/tennis_data_master.sqlite3 --dsn $env:TENNIS_DATABASE_URL --schema message_<timestamp> --report migration-report.json
 python scripts/validate_postgres_migration.py --sqlite backend/db/tennis_data_master.sqlite3 --dsn $env:TENNIS_DATABASE_URL --schema message_<timestamp> --report validation-report.json
 python scripts/reconcile_inbox_counters.py --sqlite backend/db/tennis_data_master.sqlite3 --report inbox-dry-run.json
+# If a legacy CV SQLite file exists, migrate it independently into cv_analysis.
+python scripts/migrate_cv_sqlite_to_postgres.py --sqlite cv/data/output/match_analysis.sqlite --dsn $env:TENNIS_DATABASE_URL --schema cv_analysis --dry-run
+python scripts/migrate_cv_sqlite_to_postgres.py --sqlite cv/data/output/match_analysis.sqlite --dsn $env:TENNIS_DATABASE_URL --schema cv_analysis
 ```
 
 Rows are imported in dependency order in bounded batches. A rerun skips an
@@ -60,9 +62,11 @@ conversation-last-message, Post-share, and media-binding operations until
 per-key locks are introduced deliberately.
 
 The message-media tables remain isolated from Post and tennis-diary upload
-tables. `media_id`, `client_upload_id`, status, expiry/deletion fields, and
-storage keys are transferred as data; storage files are not copied or exposed
-through the API by the database migration.
+tables. CV analysis tables use the separate `cv_analysis` PostgreSQL schema;
+their historical columns and relationships are unchanged. `media_id`,
+`client_upload_id`, status, expiry/deletion fields, and storage keys are
+transferred as data; storage files are not copied or exposed through the API by
+the database migration.
 
 Back up both databases and the message-media storage directory before a
 production run. Rollback means stopping PostgreSQL writes and restoring the
@@ -81,5 +85,5 @@ SQLite 源库始终以只读方式打开，迁移不会删除、覆盖或修复�
 消息媒体的数据库元数据可以迁移，但原始媒体和缩略图文件不在迁移范围内，须另行
 备份并通过消息媒体清理流程治理。
 
-性能和查询计划应分别在 SQLite 与 PostgreSQL 环境中收集，作为环境诊断数据，不应
+性能和查询计划应在 PostgreSQL 环境中收集，作为环境诊断数据，不应
 作为跨机器或生产容量承诺。所有本地报告、数据库文件、WAL/SHM 和媒体文件均不提交。

@@ -1723,7 +1723,7 @@ P2 范围：
 
 消息计数口径：`chat_conversation_members.unread_count` 是会话级未读事实，
 `user_inbox_counters` 是派生导航缓存，可从 active 会话成员未读事实重建。
-SQLite 迁移输入、PostgreSQL 目标修复和校验结果必须分别记录；消息媒体文件
+SQLite 只读迁移输入、PostgreSQL 目标修复和校验结果必须分别记录；消息媒体文件
 不属于数据库迁移内容，需独立治理。
 9. 如果是 P1/P2 算法字段，是否明确输入来源、计算口径、算法版本和可回溯证据。
 

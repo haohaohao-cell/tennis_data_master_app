@@ -20,10 +20,10 @@ async def main() -> None:
         os.environ.pop("TENNIS_DATABASE_URL", None)
         os.environ.pop("TENNIS_POSTGRES_DSN", None)
         os.environ["TENNIS_DB_PATH"] = str(Path(directory) / "activity_delete.sqlite3")
-        from backend.app.core.database import get_connection, initialize_database, transaction
+        from backend.app.core.database import get_connection, initialize_sqlite_database, transaction
         from backend.app.main import app
 
-        initialize_database()
+        initialize_sqlite_database()
         owner = await asgi_request(app, "POST", "/api/v1/auth/phone-login", {"phone": "13960000001", "code": "000000"})
         other = await asgi_request(app, "POST", "/api/v1/auth/phone-login", {"phone": "13960000002", "code": "000000"})
         assert owner.status == 200 and other.status == 200

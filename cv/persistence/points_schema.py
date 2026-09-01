@@ -1,4 +1,4 @@
-"""Point-level SQLite schema helpers."""
+"""Point-level PostgreSQL schema helpers."""
 
 from __future__ import annotations
 
@@ -79,17 +79,17 @@ def create_points_table(db_path: str | Path = DEFAULT_DB_PATH) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create the SQLite points table.")
+    parser = argparse.ArgumentParser(description="Create the CV PostgreSQL points table.")
     parser.add_argument(
         "--db-path",
         type=Path,
         default=DEFAULT_DB_PATH,
-        help="Target SQLite database path.",
+        help="Deprecated compatibility path; PostgreSQL DSN comes from environment.",
     )
     args = parser.parse_args()
 
     db_path = create_points_table(args.db_path)
-    print(f"SQLite points table is ready: {db_path}")
+    print(f"CV PostgreSQL points table is ready (schema from environment); path ignored: {db_path}")
 
 
 if __name__ == "__main__":
