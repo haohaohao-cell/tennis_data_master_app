@@ -214,6 +214,95 @@ CREATE TABLE IF NOT EXISTS lessons (
     FOREIGN KEY (created_by_user_id) REFERENCES users(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS messaging_devices (
+    device_id TEXT PRIMARY KEY CHECK (length(device_id) BETWEEN 8 AND 120),
+    user_id TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (platform IN ('ios', 'android', 'web', 'unknown')),
+    app_version TEXT CHECK (app_version IS NULL OR length(app_version) <= 40),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    last_seen_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    revoked_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS message_moderation_reports (
+    report_id TEXT PRIMARY KEY, reporter_user_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('message', 'business_object', 'media')),
+    target_id TEXT NOT NULL, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL, object_type TEXT,
+    reason_code TEXT NOT NULL CHECK (reason_code IN ('spam', 'harassment', 'inappropriate', 'fraud', 'privacy', 'other')),
+    description TEXT CHECK (description IS NULL OR length(description) <= 1000),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'under_review', 'resolved', 'rejected', 'closed')),
+    resolved_at TEXT, resolved_by TEXT, resolution_code TEXT CHECK (resolution_code IS NULL OR length(resolution_code) <= 80),
+    idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 120),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (reporter_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (resolved_by) REFERENCES users(user_id), FOREIGN KEY (conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    UNIQUE (reporter_user_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS message_moderation_audit_logs (
+    audit_id TEXT PRIMARY KEY, report_id TEXT NOT NULL, actor_user_id TEXT NOT NULL,
+    previous_status TEXT, next_status TEXT NOT NULL, resolution_code TEXT,
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (report_id) REFERENCES message_moderation_reports(report_id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_user_id) REFERENCES users(user_id)
+);
+CREATE TABLE IF NOT EXISTS export_requests (export_request_id TEXT PRIMARY KEY, requester_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','processing','ready','failed','expired','cancelled')), idempotency_key TEXT NOT NULL, dry_run_summary TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text, updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text, expires_at TEXT, completed_at TEXT, error_code TEXT, FOREIGN KEY (requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE, UNIQUE (requester_user_id, idempotency_key));
+CREATE TABLE IF NOT EXISTS deletion_requests (deletion_request_id TEXT PRIMARY KEY, requester_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'review_required' CHECK (status IN ('requested','review_required','processing','completed','failed','cancelled')), idempotency_key TEXT NOT NULL, requested_scope TEXT NOT NULL, dry_run_summary TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text, updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text, completed_at TEXT, error_code TEXT, FOREIGN KEY (requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE, UNIQUE (requester_user_id, idempotency_key));
+CREATE TABLE IF NOT EXISTS compliance_audit_logs (audit_id TEXT PRIMARY KEY, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, target_kind TEXT NOT NULL, target_id TEXT NOT NULL, request_id TEXT, before_state_hash TEXT NOT NULL, after_state_hash TEXT NOT NULL, reason_code TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text, FOREIGN KEY (actor_user_id) REFERENCES users(user_id) ON DELETE CASCADE);
+ALTER TABLE export_requests ADD COLUMN IF NOT EXISTS file_key TEXT;
+
+CREATE TABLE IF NOT EXISTS push_device_tokens (
+    token_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    provider TEXT NOT NULL CHECK (provider = 'fake'),
+    environment TEXT NOT NULL CHECK (environment = 'test'),
+    token_ciphertext TEXT NOT NULL,
+    token_fingerprint TEXT NOT NULL CHECK (length(token_fingerprint) = 64),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'invalid')),
+    invalid_reason TEXT CHECK (invalid_reason IS NULL OR length(invalid_reason) <= 80),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    rotated_at TEXT,
+    revoked_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (device_id) REFERENCES messaging_devices(device_id) ON DELETE CASCADE,
+    UNIQUE (provider, environment, token_fingerprint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_tokens_device_active ON push_device_tokens(user_id, device_id, provider, environment) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_push_tokens_active_lookup ON push_device_tokens(user_id, device_id, status, updated_at);
+
+CREATE TABLE IF NOT EXISTS push_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    token_id TEXT NOT NULL,
+    channel TEXT NOT NULL CHECK (channel IN ('push')),
+    push_kind TEXT NOT NULL CHECK (push_kind IN ('direct_message', 'message_request', 'notification_event')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'sent', 'acknowledged', 'retryable', 'failed_permanent', 'suppressed', 'invalid_token', 'cancelled', 'dead_letter')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    lease_reclaim_count INTEGER NOT NULL DEFAULT 0 CHECK (lease_reclaim_count >= 0),
+    available_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    leased_at TEXT,
+    lease_owner TEXT,
+    processed_at TEXT,
+    provider_message_id TEXT,
+    error_code TEXT CHECK (error_code IS NULL OR length(error_code) <= 80),
+    last_error TEXT CHECK (last_error IS NULL OR length(last_error) <= 500),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (device_id) REFERENCES messaging_devices(device_id) ON DELETE CASCADE,
+    FOREIGN KEY (token_id) REFERENCES push_device_tokens(token_id) ON DELETE CASCADE,
+    UNIQUE (event_id, device_id, channel)
+);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_claim ON push_deliveries(status, available_at, created_at, delivery_id);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_event ON push_deliveries(event_id, device_id, channel);
+
 CREATE TABLE IF NOT EXISTS notification_events (
     notification_event_id TEXT PRIMARY KEY,
     event_type TEXT NOT NULL
@@ -395,6 +484,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     status TEXT NOT NULL DEFAULT 'sent'
         CHECK (status IN ('sent', 'revoked', 'deleted')),
     sent_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    edited_at TEXT,
     created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
     updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
     deleted_at TEXT,
@@ -432,6 +522,18 @@ CREATE TABLE IF NOT EXISTS coach_profiles (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (approved_application_id) REFERENCES coach_applications(coach_application_id),
     FOREIGN KEY (approved_by_user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS device_sync_checkpoints (
+    device_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    cursor TEXT NOT NULL CHECK (length(cursor) <= 500),
+    cursor_persisted_at TEXT NOT NULL,
+    last_event_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (device_id) REFERENCES messaging_devices(device_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE (user_id, device_id)
 );
 
 CREATE TABLE IF NOT EXISTS lesson_students (
@@ -638,6 +740,33 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     UNIQUE (event_type, message_id, event_version)
 );
 
+CREATE TABLE IF NOT EXISTS chat_message_reactions (
+    reaction_id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    reaction_type TEXT NOT NULL CHECK (length(reaction_type) BETWEEN 1 AND 32),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE (message_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_message_forwards (
+    forward_id TEXT PRIMARY KEY,
+    source_message_id TEXT NOT NULL,
+    forwarded_message_id TEXT NOT NULL UNIQUE,
+    target_conversation_id TEXT NOT NULL,
+    sender_user_id TEXT NOT NULL,
+    client_forward_id TEXT NOT NULL CHECK (length(client_forward_id) <= 120),
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text,
+    FOREIGN KEY (source_message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    FOREIGN KEY (forwarded_message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    FOREIGN KEY (target_conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE (sender_user_id, client_forward_id, target_conversation_id)
+);
+
 CREATE TABLE IF NOT EXISTS social_posts (
     social_post_id TEXT PRIMARY KEY,
     author_user_id TEXT NOT NULL,
@@ -666,6 +795,32 @@ CREATE TABLE IF NOT EXISTS social_posts (
     FOREIGN KEY (author_user_id) REFERENCES users(user_id),
     FOREIGN KEY (source_tennis_activity_id) REFERENCES tennis_activities(tennis_activity_id) ON DELETE SET NULL,
     FOREIGN KEY (reviewer_user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_sync_events (
+    user_sync_event_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    event_type TEXT NOT NULL
+        CHECK (event_type IN ('message.created', 'message.recalled', 'message.edited', 'message.reaction_changed', 'message.forwarded', 'conversation.read', 'conversation.members_changed')),
+    event_version INTEGER NOT NULL DEFAULT 1 CHECK (event_version >= 1),
+    aggregate_type TEXT NOT NULL CHECK (aggregate_type IN ('chat_message', 'chat_conversation')),
+    aggregate_id TEXT NOT NULL,
+    actor_user_id TEXT,
+    recipient_user_id TEXT NOT NULL,
+    conversation_id TEXT,
+    message_id TEXT,
+    message_seq INTEGER CHECK (message_seq IS NULL OR message_seq >= 1),
+    occurred_at TEXT NOT NULL,
+    persisted_at TEXT NOT NULL,
+    retention_epoch INTEGER NOT NULL DEFAULT 1 CHECK (retention_epoch >= 1),
+    privacy_classification TEXT NOT NULL DEFAULT 'private_metadata'
+        CHECK (privacy_classification = 'private_metadata'),
+    payload_json TEXT NOT NULL,
+    FOREIGN KEY (actor_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (recipient_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    UNIQUE (recipient_user_id, event_id)
 );
 
 CREATE TABLE IF NOT EXISTS videos (
@@ -1483,6 +1638,21 @@ CREATE INDEX IF NOT EXISTS idx_outbox_events_conversation_seq
 CREATE INDEX IF NOT EXISTS idx_outbox_events_message
     ON outbox_events(message_id);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messaging_devices_user_device
+    ON messaging_devices(user_id, device_id);
+
+CREATE INDEX IF NOT EXISTS idx_messaging_devices_user_active
+    ON messaging_devices(user_id, revoked_at, last_seen_at);
+
+CREATE INDEX IF NOT EXISTS idx_user_sync_events_recipient_cursor
+    ON user_sync_events(recipient_user_id, persisted_at, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_sync_events_conversation
+    ON user_sync_events(conversation_id, persisted_at, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_device_sync_checkpoints_user
+    ON device_sync_checkpoints(user_id, device_id);
+
 CREATE INDEX IF NOT EXISTS idx_post_shares_post_created
     ON post_shares(social_post_id, created_at DESC);
 
@@ -1505,6 +1675,24 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_created
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_target_object
     ON chat_messages(target_object_type, target_object_id);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_search_conversation_type_seq
+    ON chat_messages(conversation_id, message_type, message_seq DESC)
+    WHERE deleted_at IS NULL AND status = 'sent';
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_search_conversation_sender_seq
+    ON chat_messages(conversation_id, sender_user_id, message_seq DESC)
+    WHERE deleted_at IS NULL AND status = 'sent';
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_search_conversation_object_seq
+    ON chat_messages(conversation_id, target_object_type, target_object_id, message_seq DESC)
+    WHERE deleted_at IS NULL AND status = 'sent';
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_reactions_message
+    ON chat_message_reactions(message_id, reaction_type, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_forwards_source
+    ON chat_message_forwards(source_message_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_sort
     ON chat_message_attachments(message_id, sort_order);
