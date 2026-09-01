@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import { DiagnosticErrorBoundary } from "@/diagnostics/DiagnosticErrorBoundary";
 import { DiagnosticProvider } from "@/diagnostics/DiagnosticProvider";
 import { ActivityLocationProvider } from "@/location/ActivityLocationProvider";
+import { MessageRealtimeBridge } from "@/messages/MessageRealtimeBridge";
 
 export const unstable_settings = {
   initialRouteName: "(tabs)",
@@ -18,6 +19,7 @@ export default function RootLayout() {
       <DiagnosticProvider>
         <DiagnosticErrorBoundary>
           <AuthProvider>
+            <MessageRealtimeBridge />
             <ActivityLocationProvider>
               <RootNavigation />
             </ActivityLocationProvider>
