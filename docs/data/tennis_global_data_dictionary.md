@@ -560,6 +560,11 @@ player_b_name = "训练对手"
 
 ### 4. `tennis_activities` 网球活动表
 
+用户侧删除采用软删除：仅 `owner_user_id` 对应的当前用户可调用
+`DELETE /api/v1/tennis-activities/{id}`；不存在、越权和已删除记录统一按
+资源不存在处理。删除不会硬删 `videos`、`post_media`、消息引用或分析记录；
+同一作者 Post 的 `source_tennis_activity_id` 会置空，以保留 Post 并移除失效来源入口。
+
 一条记录代表某个用户自己的网球活动记录。`TennisActivity` 必须且只能属于一个用户。
 
 | 字段 | 类型 | 是否为空 | 默认值 | 含义 | 单位/枚举/引用 |
@@ -827,11 +832,40 @@ player_b_name = "训练对手"
 | --- | --- |
 | `chat_conversations` | `conversation_id`、`conversation_type`、`group_type`、`direct_pair_key`、`title`、`created_by_user_id`、`context_type`、`context_id`、`status`、`last_message_id`、`last_message_seq`、`last_message_preview`、`last_message_at` |
 | `chat_conversation_members` | `conversation_member_id`、`conversation_id`、`user_id`、`member_role`、`status`、`joined_at`、`left_at`、`last_read_message_id`、`last_read_message_seq`、`last_read_at`、`unread_count`、`muted_until`、`pinned_at`、`archived_at` |
-| `chat_messages` | `message_id`、`conversation_id`、`message_seq`、`sender_user_id`、`sender_type`、`message_type`、`text_content`、`payload_json`、`target_object_type`、`target_object_id`、`context_object_type`、`context_object_id`、`reply_to_message_id`、`client_message_id`、`status`、`sent_at` |
+| `chat_messages` | `message_id`、`conversation_id`、`message_seq`、`sender_user_id`、`sender_type`、`message_type`、`text_content`、`payload_json`、`target_object_type`、`target_object_id`、`context_object_type`、`context_object_id`、`reply_to_message_id`、`client_message_id`、`status`、`sent_at`、`edited_at` |
+| `chat_message_reactions` | `reaction_id`、`message_id`、`user_id`、`reaction_type`、`created_at`、`updated_at`; `(message_id, user_id)` 唯一，保证每个用户每条消息只有一个当前 reaction |
+| `chat_message_forwards` | `forward_id`、`source_message_id`、`forwarded_message_id`、`target_conversation_id`、`sender_user_id`、`client_forward_id`、`created_at`; `(sender_user_id, client_forward_id, target_conversation_id)` 唯一 |
 | `chat_message_attachments` | `attachment_id`、`message_id`、`attachment_type`、`media_id`、`media_path`、`thumbnail_path`、`mime_type`、`file_size_bytes`、`duration_ms`、`width_px`、`height_px`、`object_type`、`object_id`、`payload_json`、`sort_order` |
 | `chat_message_requests` | `message_request_id`、`requester_user_id`、`recipient_user_id`、`conversation_id`、`status`、`request_message`、`source`、`requested_at`、`responded_at`、`created_at`、`updated_at` |
 
+Stage 11B 新增三张消息同步表。`messaging_devices` 以 `device_id` 为主键，
+保存用户归属、平台、App 版本、创建/最近访问/撤销时间；不保存 Push token。
+`(user_id, device_id)` 唯一，撤销通过 `revoked_at` 保留墓碑并阻止旧设备 replay。
+`user_sync_events` 以 `user_sync_event_id` 为主键，按
+`(recipient_user_id, event_id)` 唯一，保存 recipient-scoped 的最小事件 envelope、
+`persisted_at` 和 `retention_epoch`，由 `(recipient_user_id, persisted_at, event_id)`
+索引读取。`device_sync_checkpoints` 以 `device_id` 为主键，按用户和设备保存
+HMAC 游标位置及更新时间，并通过设备/用户外键隔离 checkpoint。
+
+SQLite 与 PostgreSQL 均使用文本 ID、UTC ISO 文本时间和 JSON 文本，以保持现有
+服务契约；PostgreSQL 使用事务级 advisory lock，SQLite 使用本地单写者事务。
+三张表均为 additive、幂等初始化；停用同步读取即可保留历史消息和 Outbox，不做
+破坏性回滚。同步事件 payload 只允许 `changed_fields` 提示，不替代权限校验后的
+消息、通知或业务对象读取。SQLite 和本地 PostgreSQL 隔离 Schema 已验证；生产
+容量、保留清理和更高并发压测另行记录。
+
 `client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
+
+Stage 12 的 `edited_at` 仅在作者编辑仍为 `sent` 的文本消息时写入；reaction 不保存
+在消息 payload 中，使用独立事实表并在读取时聚合。转发记录只保存消息 ID 和调用者
+幂等键，不复制 storage key、绝对路径或业务对象内容。新增同步事件为
+`message.edited`、`message.reaction_changed`、`message.forwarded` 和
+`conversation.members_changed`，payload 仅携带 `changed_fields` 提示。
+
+既有 SQLite 在调用 `initialize_database()` 时会检测并补充 Stage 12 的列、事实表和
+索引；旧版 `user_sync_events` 仅在缺少新事件枚举时，于同一事务中复制保留全部行后
+替换约束。默认 SQLite 不应作为迁移目标。PostgreSQL 使用隔离 Schema 执行渲染器，
+以 `ADD COLUMN IF NOT EXISTS` 和约束检测升级，不应在未经批准时针对 `public` 或生产库执行。
 
 消息图片媒体 `chat_message_media` 使用独立存储根目录。`thumbnail_status` 为 `pending`、`generated` 或 `failed`；`thumbnail_failure_code` 记录派生缩略图失败原因。`storage_deleted_at` 表示原图和缩略图均完成删除，`last_cleanup_error` 保存最近一次清理错误。缩略图失败不代表原图校验失败，原图必须保留并继续按其上传状态治理。
 
@@ -1713,3 +1747,40 @@ SQLite 迁移输入、PostgreSQL 目标修复和校验结果必须分别记录�
 `duration_ms`、`checksum_sha256`、`expected_checksum_sha256`、`container` 和
 `codec`；原文件大小、宽高、MIME 和生命周期状态仍由媒体表统一维护。
 视频首帧是可删除的派生缩略图，媒体文件不随数据库迁移复制。
+# Stage 13A message object-reference access envelope
+
+Message `business_object_card` is a read-time projection rather than a copy of
+the referenced domain record. `access` is `allowed`, `denied`, or `not_found`;
+`object_state` is `active`, `archived`, `deleted`, or `unavailable`;
+`can_preview`, `can_open`, and `can_forward` are current authorization flags.
+`safe_summary` is bounded display text only. It must not contain storage keys,
+absolute paths, internal errors, private notes, lesson feedback, or raw CV
+analysis. `can_forward` is true only for a currently readable Activity, Lesson,
+or uploaded Video; it is only a source-user eligibility signal. The server
+must recheck every active target member before forwarding. Stage 13B 客户端仅在 `can_preview` 为 true 且状态为 `active` 或
+`archived` 时显示标题和 `safe_summary`；仅在 `can_open` 为 true 且存在
+受支持的本地详情路由时导航。`object_id` 只作为该受保护详情路由的 ID
+参数，绝不承载路径、storage key 或完整对象 JSON。Stage 13C-D 转发记录关联
+源消息与新消息；新消息仅保存对象类型和 ID，不保存对象状态快照或私密内容。
+
+# Stage 14A message search projection
+
+消息搜索不持久化新的业务数据。其结果是当前会话中 `chat_messages` 的只读投影，
+使用 `message_id`、`conversation_id`、`message_seq`、消息类型、发送者和时间戳，
+并可按 `target_object_type`/`target_object_id` 和有无绑定媒体筛选。`match_kind`、
+截断 highlight、以及 `media_summary`（数量、类型、生命周期状态）均为响应派生字段。
+它们不得保存或返回媒体 storage key、路径、原始对象 JSON 或失权对象摘要；对象展示
+仍以实时 `business_object_card` 的 access/object_state/can_open 为准。
+
+# Stage 14D and Stage 16B governance boundaries
+
+`data_export_requests` and `data_deletion_requests` record user-scoped request
+orchestration, request/status timestamps, bounded error codes and audit linkage;
+they do not prove a full legal retention policy or account hard deletion. Export
+artifacts are addressed internally by protected relative keys only. The current
+`TestFileExportStorage` provider is test storage, not a production object-storage
+implementation. Deletion processing revokes device/token state, suppresses
+pending delivery and requests process-local WebSocket cleanup for the user; hard
+delete and automatic anonymization are deferred. Realtime provider/broker
+configuration is an integration boundary: the implemented registry is single
+process and does not provide multi-instance fan-out.

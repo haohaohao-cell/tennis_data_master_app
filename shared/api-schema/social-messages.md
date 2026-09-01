@@ -492,6 +492,24 @@ protocol. Its finite `object_type` values are `social_post`, `video`,
 cannot be read now; `unsupported` means this client/server version has no
 resolver for that object type and contains no object content.
 
+Stage 13A adds an additive current-access envelope to every card:
+`access` (`allowed`, `denied`, or `not_found`), `object_state` (`active`,
+`archived`, `deleted`, or `unavailable`), `can_preview`, `can_open`,
+`can_forward`, and `safe_summary`. The legacy presentation `state` remains
+`available`, `unavailable`, or `unsupported` for compatibility. Activity and
+Video use the existing owner/public/lesson-participant checks; Lesson uses its
+existing coach/student membership. Completed and canceled Lessons are
+`archived` but remain readable to those members. Deleted objects have no title
+or summary. An uploaded Video may still be `unavailable` for media playback;
+its storage key, path, filename, errors, and raw analysis data are never sent.
+There is currently no independent Analysis entity or detail endpoint, so an
+`analysis` reference is safely `not_found`/`unavailable` rather than granted
+an invented permission. Stage 13C-D permits `can_forward = true` only for a
+currently readable Activity, Lesson, or uploaded Video. The server still
+requires every active target-conversation member to pass the same current
+object adapter before an all-or-nothing forward is written. Analysis and chat
+upload media remain non-forwardable.
+
 ### Post share cards
 
 `post_share` messages targeting `social_post` return `share_card` from send,
@@ -606,3 +624,133 @@ MIME, byte size, dimensions, duration, checksum, container, and codec metadata,
 while storage keys remain server-only. Video messages use a `video` attachment
 and return authorized original/thumbnail URLs. Upload and message idempotency
 remain separate through `client_upload_id` and `client_message_id`.
+
+## Stage 11B Public Device Sync (Implemented / SQLite and Local PostgreSQL Verified)
+
+The current `/messages/conversations/{conversation_id}/events` endpoint remains
+an internal message-created event view. Stage 11B adds recipient-scoped device
+registration, revocation, sync and checkpoint endpoints. Cursors are HMAC-signed
+and bound to the authenticated user, device and retention epoch. The durable
+`user_sync_events` log is separate from the internal `outbox_events` worker
+queue. SQLite emits `message.created`, `message.recalled`, `message.edited`,
+`message.reaction_changed`, `message.forwarded`, `conversation.read` and
+`conversation.members_changed`
+atomically with their business transactions. Payloads contain only minimal
+`changed_fields` hints and never a Push token, storage key, server path, message
+body or copied business object. Expired cursors return `SYNC_CURSOR_EXPIRED`
+with a REST reconciliation plan. SQLite and local PostgreSQL isolated-schema
+tests are verified. Push, APNs/FCM, WebSocket and SSE are not implemented.
+### Stage 11C Fake Push
+
+Push token registration is test-only and provider-independent. It accepts only
+`fake_` tokens, returns a token id/fingerprint/status, and never returns the
+raw token. Devices and tokens are separate; rotation revokes the previous
+active token and device revoke/logout disables active tokens. Fake delivery is
+at-least-once and carries only safe target/data identifiers; sync/history is
+the authoritative recovery path. APNs, FCM, real credentials, and real
+devices are outside this contract.
+
+### Stage 11D realtime wake-up transport
+
+`WS /api/v1/messages/realtime` is an authenticated, single-instance wake-up
+channel. The client sends one initial `authenticate` frame containing its
+Bearer-equivalent access token and registered `device_id`, then sends `ping`
+heartbeats. The server replies with `pong` and may emit a duplicate-safe
+`sync.wake` envelope only after the associated `user_sync_events` transaction
+has committed:
+
+```json
+{
+  "type": "sync.wake",
+  "protocol_version": 1,
+  "event_id": "event-id",
+  "event_type": "message.created",
+  "sync_required": true,
+  "conversation_id": "conversation-id",
+  "message_seq": 12,
+  "emitted_at": "2026-08-30T00:00:00Z"
+}
+```
+
+The envelope never contains message text, media, token values, storage keys,
+or copied business objects. Delivery is at-least-once. Clients de-duplicate by
+`event_id` and call the existing REST `/messages/sync` API for authoritative
+state and cursor recovery. A disconnected socket is not a data-loss signal:
+history, sync and reconciliation remain mandatory fallback paths.
+
+## Stage 12 message operations and basic group governance
+
+`PATCH /messages/conversations/{conversation_id}/messages/{message_id}` edits
+only a sender-owned `sent` text message and preserves `message_seq`. A reaction
+is set with `PATCH .../reaction` and removed with `DELETE .../reaction`; the
+database permits one current reaction per `(message_id, user_id)`, and message
+responses expose aggregated counts plus the current viewer flag.
+
+`POST .../forward` accepts up to 20 target conversations and a
+`client_forward_id`. Every target is authorized before writes, so the request is
+all-or-nothing; retrying the same caller/key/target returns the original
+forwarded message. This release forwards a caller-owned live plain-text
+message, plus an Activity, Lesson, or uploaded Video reference when the sender
+and every active target member have current access. It copies only the object
+type and ID; history, search, and reconcile always recheck current access.
+Chat-upload media and Analysis references remain rejected because no reusable
+cross-conversation grant or Analysis entity contract exists.
+
+Group membership endpoints support adding and removing members, leaving, and
+owner-managed `admin`/`member` roles. Owners and admins can add members; admins
+cannot remove other admins or owners; owners cannot leave without a future
+ownership-transfer operation. Member changes never leave a removed user as an
+active sync recipient. All Stage 12 mutation events remain metadata-only and
+use the existing post-commit wake-up contract.
+
+### Stage 14B reports and moderation
+
+`POST /reports/messages` accepts visible `message`, `business_object`, or
+`media` references. It stores stable IDs, bounded reason text, and an
+idempotency key; identical retries return the original report and conflicting
+reuse returns `409`. Admin-only listing and processing use the existing
+AdminDependency. The minimal state machine is
+`open -> under_review -> resolved|rejected|closed`, with one minimal audit row
+per transition. Responses never expose message text, private object data,
+media paths, or storage keys.
+
+## Existing database upgrade
+
+SQLite runtime initialization detects the Stage 12 additions and performs an
+idempotent, transactional upgrade. When an old `user_sync_events` CHECK
+constraint lacks Stage 12 event types, every legacy row is copied before the
+replacement table becomes authoritative. PostgreSQL rendering uses additive
+column/table/index creation and replaces only the legacy event-type CHECK
+constraint. Operators must run PostgreSQL upgrades in an explicitly named,
+isolated schema before any production rollout.
+
+## Stage 14A authorized message search
+
+`GET /messages/conversations/{conversation_id}/messages/search` is a read-only,
+member-authorized endpoint. It supports text (`q`), sender, message type,
+sent-time range, object type with exact object ID, and media-presence filters.
+It returns normal hydrated message fields plus `match_kind`, a bounded text
+highlight, and a media count/type/state summary. Object cards are rehydrated
+for the current user; no path, storage key, raw object JSON, or inaccessible
+summary is returned. Its signed cursor is bound to user, conversation, and the
+complete normalized filter set. Search creates no sync, Push, or WebSocket
+event. Portable `LIKE` and filter indexes are a local baseline, not FTS.
+
+## Stage 14C--14D governance and Stage 16B dependency compatibility
+
+Notification preferences, notification list state, aggregate operational metrics,
+report-review audit records, export requests and deletion requests are available
+through authenticated, user- or admin-scoped APIs. Export request/download models
+return status and protected download routing only: callers never receive a
+filesystem path or storage key. The implemented export provider is
+`TestFileExportStorage`; its behavior is test evidence and is not a production
+object-storage contract.
+
+Deletion-request processing revokes registered devices and test Push token state,
+suppresses pending delivery, and schedules cleanup of this user's WebSocket
+connections in the current process. It does not hard-delete account data or
+automatically anonymize retained records. The realtime API remains compatible
+with a single-instance, process-local wake-up registry; a broker adapter and
+multi-instance fan-out are deferred. Fake Push remains restricted to the
+test-only `channel='push'` provider, with no APNs/FCM credential or device
+delivery guarantee.

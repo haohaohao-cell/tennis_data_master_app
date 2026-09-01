@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文档描述消息模块的技术架构、数据边界、接口契约、关键链路、可靠性要求和演进计划。内容以当前仓库实现为基线，不把尚未接入的 WebSocket、移动推送供应商或端到端加密描述为现有能力。
+本文档描述消息模块的技术架构、数据边界、接口契约、关键链路、可靠性要求和演进计划。内容以当前仓库实现为基线；当前仅有单实例 WebSocket 唤醒通道，不把移动推送供应商或端到端加密描述为现有能力。
 
 适用范围：
 
@@ -142,7 +142,7 @@ SQLite 是当前开发和单实例部署的事实存储。所有时间字段使�
 
 `post_share` 使用同一对象引用模型，不复制完整 Post 正文或原始媒体路径。消息响应仅在当前会话成员通过实时 Post 权限检查后提供最小 `share_card`（标题、截断摘要、作者、可见性和可选视频缩略图）；对象被删除、隐藏、未发布、被拉黑或当前不可见时返回不含内容的 `unavailable` 状态。历史、reconcile 和搜索在一页内批量读取 Post、权限关系和封面，避免按消息数增长的 Post hydration 查询；单消息发送仍只读取其自身卡片。数据库和运行时异常必须向上暴露，不能伪装为对象不可用。会话内 Post 分享使用与普通消息相同的会话事务锁，并必须携带 `client_message_id`，以避免网络重试重复写消息、未读数、隐藏会话恢复和 share 计数。本能力不调用 Post 或网球日记上传接口；`video_share` 等后续类型复用对象卡片协议，但本期不实现 UI。
 
-消息响应同时提供通用 `business_object_card` 外壳，作为对象卡片的权威状态来源；它以 `kind`、有限 `object_type`、`object_id`、`state`、最小展示字段、`metadata` 和安全不可用原因为基础。`social_post` 已实现实时权限 hydration；`video`、`tennis_activity`、`lesson` 和 `analysis` 当前返回无内容的 `unsupported`，直到各对象提供消息读取权限适配器。旧 `share_card` 仅为 `post_share` 兼容字段，由同一 hydration 结果派生。
+消息响应同时提供通用 `business_object_card` 外壳，作为对象卡片的权威状态来源；它以 `kind`、`object_type`、`object_id`、展示 `state`、`access`、`object_state`、`can_preview`、`can_open`、`can_forward` 和安全摘要为基础。App 端使用同一状态映射显示 `active`、`archived`、`deleted`、`unavailable`、`denied`、`not_found` 与 `unsupported`。只有既有的 Activity 和 Post 详情路由会在 `can_open` 为真时接收对象 ID；没有详情路由的 Lesson、Video 和 Analysis 保持不可点击。Stage 13C-D 仅对源用户和每个目标会话活跃成员均有当前访问权限的 Activity、Lesson 和已上传 Video 开放引用转发，且不复制对象内容。删除、归档、失效和权限变化不会改写历史消息，后续读取会重新水合。聊天上传媒体仍是单消息绑定，不能跨会话转发。旧 `share_card` 仅为 `post_share` 兼容字段，由同一 hydration 结果派生。
 
 Post 分享幂等键作用域为 `(authenticated_user_id, client_message_id)`。会话分享必须携带非空键；同一键只有在 Post、分享目标类型、会话、channel、message_text、消息类型、对象引用和 payload 全部一致时才是安全重试，服务端返回第一次提交的 share/message 和原始对象引用。任一字段不同返回 HTTP 409 `CLIENT_MESSAGE_ID_CONFLICT`，不返回旧记录或卡片，也不产生消息、未读、隐藏会话恢复、通知或 `share_count` 副作用。数据库部分唯一索引负责并发最终保护，应用层负责完整身份比较。旧 SQLite 升级会添加 nullable 幂等字段；检测到既有重复键时启动明确失败，不删除数据。幂等重试仍按当前 Post 权限 hydration `business_object_card`；冲突响应不包含旧卡片。Post 分享本身不复用 Post 上传接口，也不接入实时或 Push。
 
@@ -309,7 +309,7 @@ PATCH /notifications/preferences
 ### P1：实时与离线
 
 1. 接入 APNs/FCM 投递服务，复用现有 Push intent。
-2. 接入 WebSocket 或 SSE，使用 `message_seq`/事件游标补偿。
+2. 扩展单实例 WebSocket 到经授权的多实例 fan-out，使用 `message_seq`/事件游标补偿。
 3. 建立本地 outbox，支持 App 重启后的自动重试。
 4. 统一会话、通知和消息的游标分页。
 
@@ -358,5 +358,37 @@ PATCH /notifications/preferences
 `message_seq` 补偿。领取使用租约字段，PostgreSQL 采用 `FOR UPDATE SKIP LOCKED`
 和事务级锁，SQLite 仅承诺本地写入互斥。当前不接入真实事件消费者。
 
-Push provider、WebSocket/SSE、消息反应、转发、输入状态、在线状态、
-端到端加密和复杂群治理仍未实现。
+Fake Push provider、消息 reaction、受控转发和基础群成员/角色治理已实现；Push
+仍仅限 `channel='push'` 的本地测试 provider，WebSocket 仅实现单实例 process-local
+wake-up 传输。SSE、真实 APNs/FCM、输入状态、在线状态、端到端加密、复杂群治理和
+多实例 fan-out 仍未实现。
+
+## Stage 14A：授权消息搜索
+
+会话内搜索是只读接口，先验证活动成员身份，再在该会话的 live message 集合中
+按文本、发送者、消息类型、时间、对象引用和媒体存在性筛选。结果继续复用消息
+序列化与 Stage 13 对象权限水合，Activity、Lesson、Video、Post 和 Analysis 的
+当前访问状态不会被索引绕过。结果游标按 `message_seq DESC` 排序，并以 HMAC 绑定
+用户、会话和完整过滤条件；搜索不会写入同步事件或发送 WebSocket wake-up。
+
+SQLite 与 PostgreSQL 均使用 portable `LIKE` 和会话过滤索引作为正确性基线，未引入
+全文检索、中文分词、搜索集群或跨实例索引。
+
+## Stage 14B--14D 与 Stage 16B：治理和生产依赖边界
+
+消息域举报、管理员最小审核状态机、通知偏好/列表、运营聚合指标、审计记录、导出请求
+和删除请求均是已实现的基础能力。导出下载只通过 owner 授权、过期检查和内部相对 key
+读取；唯一已实现 provider 是 `TestFileExportStorage`，不得描述为生产对象存储。
+删除请求会撤销设备/token、抑制待投递记录并安排当前进程内该用户 WebSocket 清理，
+不执行账户硬删除或自动匿名化。Stage 16B 仅定义这些替换点和生产启动前配置拒绝规则，
+未接入对象存储 SDK、broker、APNs/FCM 或跨实例分发。
+
+## 14. 阶段十一 A（已完成设计）与阶段十一 B（已实现 SQLite 基础）
+
+阶段十一 A 仅完成实时、Push 和公开多设备同步的架构提案。现有
+`outbox_events` 保持内部、可租约的消息工作队列；`user_sync_events` 承载
+recipient-scoped 的公开游标重放，不能用 worker `processed` 状态判断客户端是否
+可同步。Stage 11B 已实现设备注册/撤销、HMAC 游标、用户级 sync、checkpoint、
+事件去重和过期游标 REST reconciliation；SQLite 和本地 PostgreSQL 隔离 Schema
+均已验证。现阶段只发送最小事件 envelope，REST sync/history/reconcile 仍是
+最终一致性来源。Stage 11D 的 WebSocket 仅在提交后发送有界、按用户隔离的 wake-up envelope；Push provider、APNs/FCM、SSE 和多实例 fan-out 未实现。
