@@ -41,10 +41,10 @@ async def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         os.environ["TENNIS_DB_PATH"] = str(Path(temp_dir) / "message_history_search.sqlite3")
 
-        from backend.app.core.database import get_connection, initialize_database
+        from backend.app.core.database import get_connection, initialize_sqlite_database
         from backend.app.main import app
 
-        initialize_database()
+        initialize_sqlite_database()
         (alice_token, alice_id), (bob_token, bob_id), (carol_token, carol_id) = [
             await login_phone(app, phone) for phone in ("13944300001", "13944300002", "13944300003")
         ]

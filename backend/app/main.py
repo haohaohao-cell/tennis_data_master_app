@@ -15,12 +15,14 @@ from fastapi.encoders import jsonable_encoder
 from starlette.staticfiles import StaticFiles
 
 from backend.app.admin.router import router as admin_router
+from backend.app.compliance.router import router as compliance_router
 from backend.app.auth.router import router as auth_router
 from backend.app.core.config import settings
 from backend.app.core.database import get_connection, initialize_database
 from backend.app.locations.service import warm_location_resolver_cache
 from backend.app.locations.router import router as locations_router
 from backend.app.messages.router import router as messages_router
+from backend.app.messages.realtime import registry as message_realtime_registry
 from backend.app.posts.router import router as posts_router
 from backend.app.privacy.router import router as privacy_router
 from backend.app.profile.router import router as profile_router
@@ -36,6 +38,7 @@ startup_logger = logging.getLogger("backend.startup")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings.validate_runtime_configuration()
     initialize_database()
     started_at = time.perf_counter()
     warm_location_resolver_cache()
@@ -43,7 +46,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         "location resolver warmed in %sms",
         round((time.perf_counter() - started_at) * 1000, 1),
     )
-    yield
+    try:
+        yield
+    finally:
+        await message_realtime_registry.shutdown()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -141,6 +147,7 @@ app.include_router(messages_router, prefix=settings.api_prefix)
 app.include_router(privacy_router, prefix=settings.api_prefix)
 app.include_router(reports_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
+app.include_router(compliance_router, prefix=settings.api_prefix)
 
 settings.video_storage_dir.mkdir(parents=True, exist_ok=True)
 settings.message_media_storage_dir.mkdir(parents=True, exist_ok=True)

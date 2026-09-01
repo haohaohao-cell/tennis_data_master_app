@@ -1,9 +1,11 @@
 # Backend Tests
 
-The backend runtime is PostgreSQL-only. These smoke and API scripts must be
-run with `TENNIS_DATABASE_URL` (or `TENNIS_POSTGRES_DSN`) configured and an
-initialized PostgreSQL schema. `TENNIS_DB_PATH` is retained only by the
-legacy SQLite migration tools and is ignored by the application.
+The backend runtime is PostgreSQL-only. Smoke and API scripts that exercise
+runtime behavior should use `TENNIS_DATABASE_URL` (or `TENNIS_POSTGRES_DSN`)
+and an initialized PostgreSQL schema. The retained Stage regression scripts
+that run a temporary SQLite fixture explicitly call
+`initialize_sqlite_database()`; that process-local test mode never changes
+the runtime default.
 
 The scripts that still describe themselves as SQLite-only are historical
 performance baselines, not runtime regression gates:

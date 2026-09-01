@@ -383,6 +383,64 @@ class MessageCreate(BaseModel):
         return self
 
 
+class MessageEdit(BaseModel):
+    text_content: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("text_content")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = _strip_text(value)
+        if not normalized:
+            raise ValueError("text_content is required.")
+        return normalized
+
+
+class MessageReactionCreate(BaseModel):
+    reaction_type: str = Field(min_length=1, max_length=32)
+
+    @field_validator("reaction_type")
+    @classmethod
+    def normalize_reaction(cls, value: str) -> str:
+        normalized = _strip_text(value)
+        if not normalized:
+            raise ValueError("reaction_type is required.")
+        return normalized
+
+
+class MessageForwardCreate(BaseModel):
+    target_conversation_ids: list[str] = Field(min_length=1, max_length=20)
+    client_forward_id: str = Field(min_length=1, max_length=120)
+
+    @field_validator("target_conversation_ids", "client_forward_id")
+    @classmethod
+    def normalize_forward_text(cls, value: str | list[str]) -> str | list[str]:
+        if isinstance(value, list):
+            normalized = [_strip_text(item) for item in value]
+            if any(item is None for item in normalized):
+                raise ValueError("target_conversation_ids cannot contain empty values.")
+            return list(dict.fromkeys(normalized))
+        normalized = _strip_text(value)
+        if not normalized:
+            raise ValueError("client_forward_id is required.")
+        return normalized
+
+
+class GroupMemberAdd(BaseModel):
+    user_id: str = Field(min_length=1, max_length=120)
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_user_id(cls, value: str) -> str:
+        normalized = _strip_text(value)
+        if not normalized:
+            raise ValueError("user_id is required.")
+        return normalized
+
+
+class GroupMemberRoleUpdate(BaseModel):
+    member_role: Literal["admin", "member"]
+
+
 class ChatConversationRecord(BaseModel):
     conversation_id: str
     conversation_type: ConversationType
@@ -513,6 +571,12 @@ class MessageReplyPreview(BaseModel):
     text_content: str | None = None
 
 
+class MessageReactionSummary(BaseModel):
+    reaction_type: str
+    count: int = Field(ge=0)
+    reacted_by_current_user: bool = False
+
+
 class PostShareCardAuthor(BaseModel):
     user_id: str
     nickname: str
@@ -533,7 +597,7 @@ class PostShareCard(BaseModel):
 
 
 BusinessObjectCardState = Literal["available", "unavailable", "unsupported"]
-BusinessObjectCardType = Literal["social_post", "video", "tennis_activity", "lesson", "analysis"]
+BusinessObjectCardType = str
 
 
 class BusinessObjectCard(BaseModel):
@@ -543,12 +607,18 @@ class BusinessObjectCard(BaseModel):
     object_type: BusinessObjectCardType
     object_id: str
     state: BusinessObjectCardState
+    access: Literal["allowed", "denied", "not_found"] = "not_found"
+    object_state: Literal["active", "archived", "deleted", "unavailable"] = "unavailable"
+    can_preview: bool = False
+    can_open: bool = False
+    can_forward: bool = False
+    safe_summary: str | None = None
     title: str | None = None
     summary: str | None = None
     cover_url: str | None = None
     author: PostShareCardAuthor | None = None
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
-    unavailable_reason: Literal["not_found_or_no_access", "unsupported_object_type"] | None = None
+    unavailable_reason: Literal["not_found_or_no_access", "unsupported_object_type", "deleted", "media_unavailable"] | None = None
 
 
 class ChatMessageRecord(BaseModel):
@@ -566,11 +636,13 @@ class ChatMessageRecord(BaseModel):
     context_object_id: str | None = None
     reply_to_message_id: str | None = None
     reply_preview: MessageReplyPreview | None = None
+    reactions: list[MessageReactionSummary] = Field(default_factory=list)
     business_object_card: BusinessObjectCard | None = None
     share_card: PostShareCard | None = None
     client_message_id: str | None = None
     status: str
     sent_at: str
+    edited_at: str | None = None
     created_at: str
     updated_at: str
     deleted_at: str | None = None
@@ -638,8 +710,26 @@ class MessageReconcileResponse(BaseModel):
 
 class ConversationMessageSearchResponse(BaseModel):
     conversation_id: str
-    items: list[ChatMessageRecord]
+    items: list["MessageSearchResult"]
+    next_cursor: str | None = None
+    # Kept for clients that still page using the Stage 12 sequence cursor.
     next_before_seq: int | None = None
+
+
+class MessageMediaSearchSummary(BaseModel):
+    """Search-only media metadata; storage locations are intentionally absent."""
+
+    attachment_count: int
+    media_types: list[Literal["image", "video"]] = Field(default_factory=list)
+    states: list[str] = Field(default_factory=list)
+
+
+class MessageSearchResult(ChatMessageRecord):
+    """A hydrated message plus a minimal indication of why it matched."""
+
+    match_kind: Literal["text", "business_object", "media"]
+    highlight: str | None = None
+    media_summary: MessageMediaSearchSummary | None = None
 
 
 class ConversationCreateResponse(BaseModel):
@@ -683,6 +773,19 @@ class MessageSendResponse(BaseModel):
     event_id: str | None = None
 
 
+class MessageForwardResponse(BaseModel):
+    source_message_id: str
+    items: list[MessageSendResponse]
+    event_ids: list[str] = Field(default_factory=list)
+
+
+class GroupMemberActionResponse(BaseModel):
+    success: bool
+    conversation_id: str
+    member: ConversationMemberRecord | None = None
+    event_id: str | None = None
+
+
 class MessageRecoveryResponse(BaseModel):
     found: bool
     message: ChatMessageRecord | None = None
@@ -718,11 +821,120 @@ class MessageEventListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+MessageDevicePlatform = Literal["ios", "android", "web", "unknown"]
+MessageSyncEventType = Literal[
+    "message.created",
+    "message.recalled",
+    "message.edited",
+    "message.reaction_changed",
+    "message.forwarded",
+    "conversation.read",
+    "conversation.members_changed",
+]
+
+
+class MessageDeviceRegisterRequest(BaseModel):
+    device_id: str = Field(min_length=8, max_length=120)
+    platform: MessageDevicePlatform = "unknown"
+    app_version: str | None = Field(default=None, max_length=40)
+
+
+class MessageDevicePatchRequest(BaseModel):
+    platform: MessageDevicePlatform = "unknown"
+    app_version: str | None = Field(default=None, max_length=40)
+
+
+class MessageDeviceRecord(BaseModel):
+    device_id: str
+    user_id: str
+    platform: MessageDevicePlatform
+    app_version: str | None = None
+    created_at: str
+    last_seen_at: str
+    revoked_at: str | None = None
+    updated_at: str
+
+
+class MessageDeviceResponse(BaseModel):
+    device: MessageDeviceRecord
+
+
+class MessageSyncEventRecord(BaseModel):
+    user_sync_event_id: str
+    event_id: str
+    event_type: MessageSyncEventType
+    event_version: int
+    aggregate_type: str
+    aggregate_id: str
+    actor_user_id: str | None = None
+    recipient_user_id: str
+    conversation_id: str | None = None
+    message_id: str | None = None
+    message_seq: int | None = None
+    occurred_at: str
+    persisted_at: str
+    privacy_classification: Literal["private_metadata"]
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class MessageSyncResponse(BaseModel):
+    items: list[MessageSyncEventRecord]
+    next_cursor: str | None = None
+    has_more: bool
+    server_watermark: str | None = None
+    cursor_status: Literal["initial", "valid"]
+    requires_full_reconciliation: bool = False
+
+
+class PushTokenRegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["fake"] = "fake"
+    environment: Literal["test"] = "test"
+    token: str = Field(min_length=8, max_length=512)
+
+
+class PushTokenResponse(BaseModel):
+    token_id: str
+    device_id: str
+    provider: Literal["fake"]
+    environment: Literal["test"]
+    status: Literal["active", "revoked", "invalid"]
+    token_fingerprint: str
+    created_at: str
+    rotated_at: str | None = None
+    revoked_at: str | None = None
+
+
+class PushDeliveryResponse(BaseModel):
+    delivery_id: str
+    event_id: str
+    device_id: str
+    token_id: str
+    channel: Literal["push"]
+    status: str
+    attempt_count: int
+    error_code: str | None = None
+
+
+class MessageSyncCheckpointRequest(BaseModel):
+    device_id: str = Field(min_length=8, max_length=120)
+    cursor: str = Field(min_length=1, max_length=500)
+
+
+class MessageSyncCheckpointResponse(BaseModel):
+    success: bool
+    device_id: str
+    cursor: str
+    updated_at: str
+
+
 class MarkReadResponse(BaseModel):
     success: bool
     conversation_id: str
     unread_count: int
     last_read_message_seq: int
+    event_id: str | None = None
 
 
 class MarkReadRequest(BaseModel):

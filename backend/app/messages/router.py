@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+import asyncio
+
+from fastapi import APIRouter, Depends, File, Query, UploadFile, WebSocket, WebSocketDisconnect, status
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.auth.dependencies import get_current_user
 from backend.app.auth.schemas import UserPublic
 from backend.app.messages import service
 from backend.app.messages import media_service
 from backend.app.messages import outbox
+from backend.app.messages import sync
+from backend.app.messages import push
+from backend.app.messages import realtime
 from backend.app.messages.schemas import (
     ConversationCreateResponse,
     ConversationListResponse,
@@ -18,10 +24,17 @@ from backend.app.messages.schemas import (
     ConversationPinResponse,
     DirectConversationCreate,
     GroupConversationCreate,
+    GroupMemberActionResponse,
+    GroupMemberAdd,
+    GroupMemberRoleUpdate,
     MarkReadRequest,
     MarkReadResponse,
     MessageCreate,
+    MessageEdit,
+    MessageForwardCreate,
+    MessageForwardResponse,
     MessageListResponse,
+    MessageReactionCreate,
     MessageReconcileRequest,
     MessageReconcileResponse,
     MessageRequestActionResponse,
@@ -38,10 +51,81 @@ from backend.app.messages.schemas import (
     MessageMediaUploadIntentResponse,
     MessageMediaResponse,
     UnreadCountsResponse,
+    MessageDevicePatchRequest,
+    MessageDeviceRegisterRequest,
+    MessageDeviceResponse,
+    MessageSyncCheckpointRequest,
+    MessageSyncCheckpointResponse,
+    MessageSyncResponse,
+    PushTokenRegisterRequest,
+    PushTokenResponse,
 )
 
 
 router = APIRouter(tags=["messages"])
+
+
+@router.post("/messages/devices", response_model=MessageDeviceResponse)
+def register_message_device(
+    payload: MessageDeviceRegisterRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageDeviceResponse:
+    return sync.register_device(current_user.user_id, payload)
+
+
+@router.patch("/messages/devices/{device_id}", response_model=MessageDeviceResponse)
+def update_message_device(
+    device_id: str,
+    payload: MessageDevicePatchRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageDeviceResponse:
+    return sync.update_device(current_user.user_id, device_id, payload)
+
+
+@router.delete("/messages/devices/{device_id}", response_model=MessageDeviceResponse)
+def revoke_message_device(
+    device_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageDeviceResponse:
+    response = sync.revoke_device(current_user.user_id, device_id)
+    realtime.registry.disconnect_device(current_user.user_id, device_id)
+    return response
+
+
+@router.post("/messages/devices/{device_id}/push-tokens", response_model=PushTokenResponse)
+def register_push_token(
+    device_id: str,
+    payload: PushTokenRegisterRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> PushTokenResponse:
+    return push.register_token(current_user.user_id, device_id, payload)
+
+
+@router.delete("/messages/devices/{device_id}/push-tokens/{token_id}", response_model=PushTokenResponse)
+def revoke_push_token(
+    device_id: str,
+    token_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> PushTokenResponse:
+    return push.revoke_token(current_user.user_id, device_id, token_id)
+
+
+@router.get("/messages/sync", response_model=MessageSyncResponse)
+def sync_messages(
+    device_id: Annotated[str, Query(min_length=8, max_length=120)],
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+    cursor: Annotated[str | None, Query(max_length=500)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> MessageSyncResponse:
+    return sync.sync_events(current_user.user_id, device_id, cursor, limit)
+
+
+@router.post("/messages/sync/checkpoints", response_model=MessageSyncCheckpointResponse)
+def save_message_sync_checkpoint(
+    payload: MessageSyncCheckpointRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageSyncCheckpointResponse:
+    return sync.save_checkpoint(current_user.user_id, payload)
 
 
 @router.post(
@@ -253,9 +337,17 @@ def unhide_conversation(
 def search_conversation_messages(
     conversation_id: str,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
-    q: Annotated[str, Query()],
+    q: str = "",
     page_size: Annotated[int, Query(ge=1, le=100)] = 30,
     before_seq: Annotated[int | None, Query(ge=1)] = None,
+    cursor: Annotated[str | None, Query(max_length=500)] = None,
+    sender_user_id: Annotated[str | None, Query(max_length=100)] = None,
+    message_type: Annotated[str | None, Query(max_length=32)] = None,
+    object_type: Annotated[str | None, Query(max_length=32)] = None,
+    object_id: Annotated[str | None, Query(max_length=100)] = None,
+    has_media: bool | None = None,
+    sent_after: Annotated[str | None, Query(max_length=40)] = None,
+    sent_before: Annotated[str | None, Query(max_length=40)] = None,
 ) -> ConversationMessageSearchResponse:
     return service.search_conversation_messages(
         current_user.user_id,
@@ -263,6 +355,14 @@ def search_conversation_messages(
         q,
         page_size,
         before_seq,
+        cursor,
+        sender_user_id,
+        message_type,
+        object_type,
+        object_id,
+        has_media,
+        sent_after,
+        sent_before,
     )
 
 
@@ -326,7 +426,73 @@ def send_message(
     payload: MessageCreate,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ) -> MessageSendResponse:
-    return service.send_message(current_user.user_id, conversation_id, payload)
+    response = service.send_message(current_user.user_id, conversation_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.patch(
+    "/messages/conversations/{conversation_id}/messages/{message_id}",
+    response_model=MessageSendResponse,
+)
+def edit_message(
+    conversation_id: str,
+    message_id: str,
+    payload: MessageEdit,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageSendResponse:
+    response = service.edit_message(current_user.user_id, conversation_id, message_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.patch(
+    "/messages/conversations/{conversation_id}/messages/{message_id}/reaction",
+    response_model=MessageSendResponse,
+)
+def set_message_reaction(
+    conversation_id: str,
+    message_id: str,
+    payload: MessageReactionCreate,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageSendResponse:
+    response = service.set_message_reaction(current_user.user_id, conversation_id, message_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.delete(
+    "/messages/conversations/{conversation_id}/messages/{message_id}/reaction",
+    response_model=MessageSendResponse,
+)
+def remove_message_reaction(
+    conversation_id: str,
+    message_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageSendResponse:
+    response = service.remove_message_reaction(current_user.user_id, conversation_id, message_id)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.post(
+    "/messages/conversations/{conversation_id}/messages/{message_id}/forward",
+    response_model=MessageForwardResponse,
+)
+def forward_message(
+    conversation_id: str,
+    message_id: str,
+    payload: MessageForwardCreate,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> MessageForwardResponse:
+    response = service.forward_message(current_user.user_id, conversation_id, message_id, payload)
+    for event_id in response.event_ids:
+        realtime.registry.publish_from_sync_event(event_id)
+    return response
 
 
 @router.post(
@@ -338,7 +504,58 @@ def recall_message(
     message_id: str,
     current_user: Annotated[UserPublic, Depends(get_current_user)],
 ) -> MessageSendResponse:
-    return service.recall_message(current_user.user_id, conversation_id, message_id)
+    response = service.recall_message(current_user.user_id, conversation_id, message_id)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.post("/messages/conversations/{conversation_id}/members", response_model=GroupMemberActionResponse)
+def add_group_member(
+    conversation_id: str,
+    payload: GroupMemberAdd,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> GroupMemberActionResponse:
+    response = service.add_group_member(current_user.user_id, conversation_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.delete("/messages/conversations/{conversation_id}/members/{user_id}", response_model=GroupMemberActionResponse)
+def remove_group_member(
+    conversation_id: str,
+    user_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> GroupMemberActionResponse:
+    response = service.remove_group_member(current_user.user_id, conversation_id, user_id)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.post("/messages/conversations/{conversation_id}/leave", response_model=GroupMemberActionResponse)
+def leave_group(
+    conversation_id: str,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> GroupMemberActionResponse:
+    response = service.leave_group(current_user.user_id, conversation_id)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.patch("/messages/conversations/{conversation_id}/members/{user_id}/role", response_model=GroupMemberActionResponse)
+def update_group_member_role(
+    conversation_id: str,
+    user_id: str,
+    payload: GroupMemberRoleUpdate,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+) -> GroupMemberActionResponse:
+    response = service.update_group_member_role(current_user.user_id, conversation_id, user_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
 
 
 @router.post(
@@ -350,7 +567,51 @@ def mark_conversation_read(
     current_user: Annotated[UserPublic, Depends(get_current_user)],
     payload: MarkReadRequest | None = None,
 ) -> MarkReadResponse:
-    return service.mark_conversation_read(current_user.user_id, conversation_id, payload)
+    response = service.mark_conversation_read(current_user.user_id, conversation_id, payload)
+    if response.event_id:
+        realtime.registry.publish_from_sync_event(response.event_id)
+    return response
+
+
+@router.websocket("/messages/realtime")
+async def message_realtime(websocket: WebSocket) -> None:
+    """Authenticated, recipient-isolated wake-up channel with REST recovery."""
+    await websocket.accept()
+    try:
+        auth_frame = await asyncio.wait_for(
+            websocket.receive_json(),
+            timeout=realtime.AUTHENTICATION_TIMEOUT_SECONDS,
+        )
+        if not isinstance(auth_frame, dict) or auth_frame.get("type") != "authenticate":
+            await websocket.close(code=4401, reason="authentication required")
+            return
+        token = auth_frame.get("access_token")
+        device_id = auth_frame.get("device_id")
+        if not isinstance(token, str) or not isinstance(device_id, str):
+            await websocket.close(code=4401, reason="invalid authentication")
+            return
+        from backend.app.auth.service import authenticate_access_token
+
+        session = await run_in_threadpool(authenticate_access_token, token)
+        device_ok = await run_in_threadpool(realtime.active_device_is_valid, session.user.user_id, device_id)
+        if not device_ok:
+            await websocket.close(code=4403, reason="messaging device unavailable")
+            return
+        connection = await realtime.registry.register(session.user.user_id, device_id, websocket)
+        await websocket.send_json({"type": "ready", "protocol_version": realtime.PROTOCOL_VERSION, "emitted_at": realtime.utc_now_iso()})
+        try:
+            await realtime.relay_connection(connection)
+        finally:
+            realtime.registry.unregister(connection)
+    except WebSocketDisconnect:
+        return
+    except TimeoutError:
+        await websocket.close(code=4401, reason="authentication timeout")
+    except Exception:
+        try:
+            await websocket.close(code=4401, reason="authentication failed")
+        except Exception:
+            pass
 
 
 @router.get("/messages/unread-counts", response_model=UnreadCountsResponse)

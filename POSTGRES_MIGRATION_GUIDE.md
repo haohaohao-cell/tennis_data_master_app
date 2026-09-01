@@ -300,4 +300,3 @@ Invoke-WebRequest http://localhost:8000/health
 ### PostgreSQL 已有数据，是否可以重新迁移
 
 可以重复执行。完全相同的主键记录会跳过；不同内容会报告冲突。不要为了重试而删除整个数据库或执行 `TRUNCATE`。
-

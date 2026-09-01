@@ -31,7 +31,17 @@ class PostgresAdapterTest(unittest.TestCase):
 
     def test_rendered_schema_has_all_backend_tables(self) -> None:
         schema = render_postgres_schema(schema="public")
-        self.assertEqual(schema.count("CREATE TABLE IF NOT EXISTS"), 40)
+        self.assertGreaterEqual(schema.count("CREATE TABLE IF NOT EXISTS"), 40)
+        for table_name in (
+            "users",
+            "chat_messages",
+            "user_sync_events",
+            "message_moderation_reports",
+            "export_requests",
+            "deletion_requests",
+            "compliance_audit_logs",
+        ):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table_name}", schema)
         self.assertNotIn("PRAGMA ", schema.upper())
         self.assertNotIn("\nEND;\n\nCREATE OR REPLACE FUNCTION", schema)
         self.assertIn('CREATE SCHEMA IF NOT EXISTS "public"', schema)

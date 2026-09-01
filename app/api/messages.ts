@@ -225,16 +225,22 @@ export type PostShareCard = {
 };
 
 export type BusinessObjectCard = {
+  access: "allowed" | "denied" | "not_found";
   author: PostShareCard["author"];
+  can_forward: boolean;
+  can_open: boolean;
+  can_preview: boolean;
   cover_url: string | null;
   kind: "business_object";
   metadata: Record<string, boolean | number | string | null>;
   object_id: string;
-  object_type: "social_post" | "video" | "tennis_activity" | "lesson" | "analysis";
+  object_state: "active" | "archived" | "deleted" | "unavailable";
+  object_type: string;
+  safe_summary: string | null;
   state: "available" | "unavailable" | "unsupported";
   summary: string | null;
   title: string | null;
-  unavailable_reason: "not_found_or_no_access" | "unsupported_object_type" | null;
+  unavailable_reason: "not_found_or_no_access" | "unsupported_object_type" | "deleted" | "media_unavailable" | null;
 };
 
 export type ChatMessageRecord = {
@@ -246,12 +252,14 @@ export type ChatMessageRecord = {
   conversation_id: string;
   created_at: string;
   deleted_at: string | null;
+  edited_at: string | null;
   message_id: string;
   message_seq: number;
   message_type: MessageType;
   payload_json: string | null;
   reply_to_message_id: string | null;
   reply_preview: MessageReplyPreview | null;
+  reactions: MessageReactionSummary[];
   sender: MessageUserSummary | null;
   sender_type: string;
   sender_user_id: string | null;
@@ -274,8 +282,21 @@ export type MessageListResponse = {
 
 export type ConversationMessageSearchResponse = {
   conversation_id: string;
-  items: ChatMessageRecord[];
+  items: MessageSearchResult[];
+  next_cursor: string | null;
   next_before_seq: number | null;
+};
+
+export type MessageMediaSearchSummary = {
+  attachment_count: number;
+  media_types: ("image" | "video")[];
+  states: string[];
+};
+
+export type MessageSearchResult = ChatMessageRecord & {
+  highlight: string | null;
+  match_kind: "text" | "business_object" | "media";
+  media_summary: MessageMediaSearchSummary | null;
 };
 
 export type DirectConversationInteractionState = {
@@ -316,6 +337,12 @@ export type OutboxEventRecord = {
   last_error_message: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type MessageReactionSummary = {
+  reaction_type: string;
+  count: number;
+  reacted_by_current_user: boolean;
 };
 
 export type MessageEventListResponse = {
@@ -683,6 +710,75 @@ export function recallMessage(accessToken: string, conversationId: string, messa
   );
 }
 
+export function editMessage(accessToken: string, conversationId: string, messageId: string, textContent: string) {
+  return apiRequest<MessageSendResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+    { accessToken, body: { text_content: textContent }, method: "PATCH" },
+  );
+}
+
+export function setMessageReaction(accessToken: string, conversationId: string, messageId: string, reactionType: string) {
+  return apiRequest<MessageSendResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reaction`,
+    { accessToken, body: { reaction_type: reactionType }, method: "PATCH" },
+  );
+}
+
+export function removeMessageReaction(accessToken: string, conversationId: string, messageId: string) {
+  return apiRequest<MessageSendResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reaction`,
+    { accessToken, method: "DELETE" },
+  );
+}
+
+export function forwardMessage(
+  accessToken: string,
+  conversationId: string,
+  messageId: string,
+  targetConversationIds: string[],
+  clientForwardId: string,
+) {
+  return apiRequest<{ source_message_id: string; items: MessageSendResponse[]; event_ids: string[] }>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/forward`,
+    { accessToken, body: { client_forward_id: clientForwardId, target_conversation_ids: targetConversationIds }, method: "POST" },
+  );
+}
+
+export type GroupMemberActionResponse = {
+  success: boolean;
+  conversation_id: string;
+  member: ConversationMemberRecord | null;
+  event_id: string | null;
+};
+
+export function addGroupMember(accessToken: string, conversationId: string, userId: string) {
+  return apiRequest<GroupMemberActionResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/members`,
+    { accessToken, body: { user_id: userId }, method: "POST" },
+  );
+}
+
+export function removeGroupMember(accessToken: string, conversationId: string, userId: string) {
+  return apiRequest<GroupMemberActionResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
+    { accessToken, method: "DELETE" },
+  );
+}
+
+export function leaveGroup(accessToken: string, conversationId: string) {
+  return apiRequest<GroupMemberActionResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/leave`,
+    { accessToken, method: "POST" },
+  );
+}
+
+export function updateGroupMemberRole(accessToken: string, conversationId: string, userId: string, memberRole: "admin" | "member") {
+  return apiRequest<GroupMemberActionResponse>(
+    `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}/role`,
+    { accessToken, body: { member_role: memberRole }, method: "PATCH" },
+  );
+}
+
 export function reconcileMessages(accessToken: string, conversationId: string, messageIds: string[]) {
   return apiRequest<{ conversation_id: string; items: ChatMessageRecord[] }>(
     `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/reconcile`,
@@ -719,8 +815,19 @@ export function markConversationRead(
 export function searchConversationMessages(
   accessToken: string,
   conversationId: string,
-  query: string,
-  options: { beforeSeq?: number | null; pageSize?: number } = {},
+  query = "",
+  options: {
+    beforeSeq?: number | null;
+    cursor?: string | null;
+    hasMedia?: boolean | null;
+    messageType?: MessageType | null;
+    objectId?: string | null;
+    objectType?: string | null;
+    pageSize?: number;
+    senderUserId?: string | null;
+    sentAfter?: string | null;
+    sentBefore?: string | null;
+  } = {},
 ) {
   const params = new URLSearchParams({
     page_size: String(options.pageSize ?? 30),
@@ -729,6 +836,14 @@ export function searchConversationMessages(
   if (options.beforeSeq) {
     params.set("before_seq", String(options.beforeSeq));
   }
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.senderUserId) params.set("sender_user_id", options.senderUserId);
+  if (options.messageType) params.set("message_type", options.messageType);
+  if (options.objectType) params.set("object_type", options.objectType);
+  if (options.objectId) params.set("object_id", options.objectId);
+  if (options.hasMedia !== null && options.hasMedia !== undefined) params.set("has_media", String(options.hasMedia));
+  if (options.sentAfter) params.set("sent_after", options.sentAfter);
+  if (options.sentBefore) params.set("sent_before", options.sentBefore);
   return apiRequest<ConversationMessageSearchResponse>(
     `/api/v1/messages/conversations/${encodeURIComponent(conversationId)}/messages/search?${params.toString()}`,
     { accessToken, captureDiagnostics: false },

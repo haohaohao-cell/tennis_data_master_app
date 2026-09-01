@@ -868,7 +868,7 @@ function PlayerTabContent({
                 clearPostDetailPreview(socialPostId);
                 await onRefreshContent();
               })
-              .catch((error) =>
+              .catch((error: unknown) =>
                 Alert.alert("删除失败", profileContentErrorMessage(error)),
               )
               .finally(() => setDeletingContentId(null));
@@ -893,7 +893,7 @@ function PlayerTabContent({
             setDeletingContentId(tennisActivityId);
             void deleteActivity(accessToken, tennisActivityId)
               .then(() => onRefreshContent())
-              .catch((error) =>
+              .catch((error: unknown) =>
                 Alert.alert("删除失败", profileContentErrorMessage(error)),
               )
               .finally(() => setDeletingContentId(null));
