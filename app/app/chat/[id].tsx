@@ -46,7 +46,6 @@ import {
   type ConversationListItem,
   type DirectConversationInteractionState,
   type MessageReplyPreview,
-  type PostShareCard,
 } from "@/api/messages";
 import { recoverMessageByClientId } from "@/api/messages";
 import {
@@ -64,6 +63,10 @@ import {
 } from "@/api/messageOutbox";
 import { useAuth } from "@/auth/AuthProvider";
 import { useRequireAuth } from "@/auth/useRequireAuth";
+import {
+  messageBusinessObjectCardModel,
+  messageBusinessObjectCardStateLabel,
+} from "@/messages/businessObjectCard";
 import { Avatar } from "@/components/ui";
 import { colors, radius, spacing } from "@/theme";
 
@@ -270,6 +273,7 @@ function createLocalMessage({
     conversation_id: conversationId,
     created_at: now,
     deleted_at: null,
+    edited_at: null,
     local_status: "sending",
     local_id: localId,
     message_id: `local-${clientMessageId}`,
@@ -278,6 +282,7 @@ function createLocalMessage({
     payload_json: null,
     reply_to_message_id: replyPreview?.message_id ?? null,
     reply_preview: replyPreview,
+    reactions: [],
     sender: null,
     sender_type: "user",
     sender_user_id: userId,
@@ -1573,6 +1578,7 @@ function localMessageFromOutbox(item: LocalMessageOutboxItem, userId: string | n
     conversation_id: item.conversation_id,
     created_at: item.created_at,
     deleted_at: null,
+    edited_at: null,
     local_id: item.local_id,
     local_error: item.last_error_code,
     local_retryable: item.local_state === "failed_retryable" || item.local_state === "queued" || item.local_state === "sending",
@@ -1583,6 +1589,7 @@ function localMessageFromOutbox(item: LocalMessageOutboxItem, userId: string | n
     payload_json: null,
     reply_to_message_id: item.message.reply_to_message_id ?? null,
     reply_preview: null,
+    reactions: [],
     sender: null,
     sender_type: "user",
     sender_user_id: userId,
@@ -1636,63 +1643,48 @@ function VideoMessageContent({ accessToken, message, mine }: { accessToken: stri
 }
 
 function BusinessObjectMessageCard({ card, mine }: { card: BusinessObjectCard; mine: boolean }) {
-  if (card.object_type !== "social_post") {
-    return <Text style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>该业务内容暂不支持展示</Text>;
-  }
-  return <PostShareMessageCard mine={mine} card={{
-    state: card.state === "available" ? "available" : "unavailable",
-    post_id: card.object_id,
-    reason: card.unavailable_reason === "not_found_or_no_access" ? "not_found_or_no_access" : null,
-    title: card.title,
-    summary: card.summary,
-    cover_url: card.cover_url,
-    author: card.author,
-    visibility: typeof card.metadata.visibility === "string" ? card.metadata.visibility : null,
-  }} />;
-}
-
-function PostShareMessageCard({ card, mine }: { card: PostShareCard; mine: boolean }) {
   const router = useRouter();
   const [coverFailed, setCoverFailed] = useState(false);
-  const unavailable = card.state === "unavailable";
+  const model = messageBusinessObjectCardModel(card);
+  const unavailable = model.displayState !== "active" && model.displayState !== "archived";
   const coverUrl = card.cover_url ? resolveMediaUrl(card.cover_url) : null;
+  const statusLabel = messageBusinessObjectCardStateLabel(model.displayState);
 
-  const openPost = useCallback(() => {
-    if (!unavailable) {
-      router.push({ pathname: "/post/[id]", params: { id: card.post_id } });
-    }
-  }, [card.post_id, router, unavailable]);
+  const openObject = useCallback(() => {
+    if (model.destination) router.push(model.destination);
+  }, [model.destination, router]);
 
   return (
     <Pressable
-      accessibilityLabel={unavailable ? "分享内容不可用" : "查看分享的动态"}
+      accessibilityLabel={model.destination ? `查看${model.label}` : `${model.label}${statusLabel || "不可打开"}`}
       accessibilityRole="button"
-      disabled={unavailable}
-      onPress={openPost}
-      style={[styles.postShareCard, mine && styles.postShareCardMine, unavailable && styles.postShareCardUnavailable]}
+      disabled={!model.destination}
+      onPress={openObject}
+      style={[styles.postShareCard, mine && styles.postShareCardMine, !model.destination && styles.postShareCardUnavailable]}
     >
       <View style={styles.postShareCover}>
-        {coverUrl && !coverFailed ? (
+        {coverUrl && !coverFailed && model.displayState === "active" ? (
           <Image
-            accessibilityLabel="动态封面"
+            accessibilityLabel={`${model.label}封面`}
             contentFit="cover"
             onError={() => setCoverFailed(true)}
             source={{ uri: coverUrl }}
             style={styles.postShareCoverImage}
           />
         ) : (
-          <Ionicons color={colors.muted} name="document-text-outline" size={25} />
+          <Ionicons color={colors.muted} name={model.icon} size={25} />
         )}
       </View>
       <View style={styles.postShareContent}>
-        <Text numberOfLines={1} style={[styles.postShareLabel, mine && styles.postShareTextMine]}>分享了一条动态</Text>
+        <Text numberOfLines={1} style={[styles.postShareLabel, mine && styles.postShareTextMine]}>分享了{model.label}</Text>
         {unavailable ? (
-          <Text numberOfLines={2} style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>内容不可用</Text>
+          <Text numberOfLines={2} style={[styles.postShareUnavailableText, mine && styles.postShareTextMine]}>{statusLabel}</Text>
         ) : (
           <>
-            <Text numberOfLines={2} style={[styles.postShareTitle, mine && styles.postShareTextMine]}>{card.title ?? "网球动态"}</Text>
-            <Text numberOfLines={1} style={[styles.postShareAuthor, mine && styles.postShareTextMine]}>{card.author?.nickname ?? "用户"}</Text>
-            {card.summary ? <Text numberOfLines={2} style={[styles.postShareSummary, mine && styles.postShareTextMine]}>{card.summary}</Text> : null}
+            <Text numberOfLines={2} style={[styles.postShareTitle, mine && styles.postShareTextMine]}>{model.title ?? model.label}</Text>
+            {card.object_type === "social_post" ? <Text numberOfLines={1} style={[styles.postShareAuthor, mine && styles.postShareTextMine]}>{card.author?.nickname ?? "用户"}</Text> : null}
+            {model.summary ? <Text numberOfLines={2} style={[styles.postShareSummary, mine && styles.postShareTextMine]}>{model.summary}</Text> : null}
+            {model.displayState === "archived" ? <Text style={[styles.postShareState, mine && styles.postShareTextMine]}>{statusLabel}</Text> : null}
           </>
         )}
       </View>
@@ -1991,6 +1983,12 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     lineHeight: 17,
+  },
+  postShareState: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 3,
   },
   postShareUnavailableText: {
     color: colors.muted,

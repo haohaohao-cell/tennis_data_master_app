@@ -295,7 +295,7 @@ app.post_detail.comments_panel
 | `app.chat.quote_preview` | 引用消息预览 | component | 消息气泡中的回复引用与定位入口 |
 | `app.chat.reply_composer_preview` | 回复编辑预览 | component | 输入区上方的回复目标提示和取消入口 |
 | `app.chat.post_share_card` | 动态分享卡片 | component | 聊天中的 Post 缩略图、摘要、作者与安全跳转入口 |
-| `app.chat.business_object_card` | 业务对象消息卡片 | component | 统一分发可用、不可用和暂不支持的业务对象消息状态 |
+| `app.chat.business_object_card` | 业务对象消息卡片 | component | 统一呈现可用、归档、删除、无权、失效、不可用和暂不支持状态，并受 `can_open` 控制跳转 |
 | `app.chat.loading_state` | 聊天加载状态 | state | 会话加载中 |
 
 ## 球友搜索

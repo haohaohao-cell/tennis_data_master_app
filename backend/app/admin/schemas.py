@@ -122,6 +122,25 @@ class AdminUserListResponse(PaginationResponse):
     items: list[AdminUserRecord]
 
 
+class AdminMessageMetrics(BaseModel):
+    scope: Literal["development_local_aggregate"] = "development_local_aggregate"
+    since: str
+    until: str
+    messages: dict[str, int]
+    sync_events: int
+    push_deliveries: dict[str, int]
+    reports: dict[str, int]
+    report_targets: dict[str, int]
+    report_reasons: dict[str, int]
+    object_references: dict[str, int]
+
+
+class AdminAiAssistResponse(BaseModel):
+    status: Literal["not_implemented", "unavailable"]
+    requires_human_confirmation: bool = True
+    reason: str
+
+
 class AdminUserCreate(BaseModel):
     nickname: str = Field(max_length=50)
     avatar_path: str | None = None

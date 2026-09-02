@@ -39,6 +39,11 @@ export function primePostDetailPreview(detail: PostDetailResponse) {
   pruneOverflow();
 }
 
+/** Remove a deleted Post from the in-memory detail preview cache. */
+export function clearPostDetailPreview(socialPostId: string) {
+  cachedDetails.delete(socialPostId);
+}
+
 export function peekPostDetailPreview(socialPostId: string | null | undefined) {
   if (!socialPostId) {
     return null;

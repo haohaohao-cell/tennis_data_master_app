@@ -30,6 +30,25 @@ from backend.app.admin.schemas import (
 from backend.app.auth.service import TokenIssue, issue_tokens_for_user, raise_api_error
 from backend.app.core.database import get_connection, transaction
 from backend.app.core.time import utc_now_iso
+from backend.app.admin.schemas import AdminAiAssistResponse, AdminMessageMetrics
+
+
+def message_metrics(since: str, until: str) -> AdminMessageMetrics:
+    with get_connection() as connection:
+        def counts(sql: str, params: tuple[Any, ...] = ()) -> dict[str, int]:
+            return {str(row["key"]): int(row["value"]) for row in connection.execute(sql, params).fetchall()}
+        messages = counts("SELECT message_type AS key, COUNT(*) AS value FROM chat_messages WHERE created_at >= ? AND created_at < ? GROUP BY message_type;", (since, until))
+        sync_events = int(connection.execute("SELECT COUNT(*) AS count FROM user_sync_events WHERE persisted_at >= ? AND persisted_at < ?;", (since, until)).fetchone()["count"])
+        push_deliveries = counts("SELECT status AS key, COUNT(*) AS value FROM push_deliveries WHERE created_at >= ? AND created_at < ? GROUP BY status;", (since, until))
+        reports = counts("SELECT status AS key, COUNT(*) AS value FROM message_moderation_reports WHERE created_at >= ? AND created_at < ? GROUP BY status;", (since, until))
+        report_targets = counts("SELECT target_kind AS key, COUNT(*) AS value FROM message_moderation_reports WHERE created_at >= ? AND created_at < ? GROUP BY target_kind;", (since, until))
+        report_reasons = counts("SELECT reason_code AS key, COUNT(*) AS value FROM message_moderation_reports WHERE created_at >= ? AND created_at < ? GROUP BY reason_code;", (since, until))
+        object_references = counts("SELECT target_object_type AS key, COUNT(*) AS value FROM chat_messages WHERE target_object_type IS NOT NULL AND created_at >= ? AND created_at < ? GROUP BY target_object_type;", (since, until))
+    return AdminMessageMetrics(since=since, until=until, messages=messages, sync_events=sync_events, push_deliveries=push_deliveries, reports=reports, report_targets=report_targets, report_reasons=report_reasons, object_references=object_references)
+
+
+def ai_assist_unavailable() -> AdminAiAssistResponse:
+    return AdminAiAssistResponse(status="not_implemented", reason="No authorized model or external inference provider is configured.")
 
 
 PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"

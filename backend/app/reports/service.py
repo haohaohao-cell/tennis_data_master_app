@@ -7,9 +7,12 @@ from typing import Any
 from fastapi import status
 
 from backend.app.auth.service import raise_api_error
-from backend.app.core.database import transaction
+from backend.app.core.database import get_connection, transaction
+from backend.app.core.time import utc_now_iso
+from backend.app.messages.business_object_access import resolve_business_object_access
 from backend.app.posts import interaction_service as post_interactions
 from backend.app.reports.schemas import ContentReportCreate, ContentReportCreateResponse, ContentReportRecord
+from backend.app.reports.schemas import MessageReportCreate, MessageReportListResponse, MessageReportRecord, MessageReportResponse, MessageReportUpdate
 
 
 def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -193,3 +196,78 @@ def create_report(user_id: str, payload: ContentReportCreate) -> ContentReportCr
             (report_id,),
         ).fetchone()
     return ContentReportCreateResponse(success=True, report=_report_record(row))
+
+
+def _message_report_record(row: Any) -> MessageReportRecord:
+    return MessageReportRecord(**_row_dict(row))
+
+
+def _validate_message_report_target(connection: Any, user_id: str, payload: MessageReportCreate) -> Any:
+    if payload.target_kind == "message":
+        row = connection.execute("SELECT * FROM chat_messages WHERE message_id = ? AND deleted_at IS NULL AND status = 'sent' LIMIT 1;", (payload.target_id,)).fetchone()
+        if row is None:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+        member = connection.execute("SELECT 1 FROM chat_conversation_members WHERE conversation_id = ? AND user_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1;", (row["conversation_id"], user_id)).fetchone()
+        if member is None:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+        return row
+    if payload.target_kind == "business_object":
+        row = connection.execute("SELECT * FROM chat_messages WHERE message_id = ? AND deleted_at IS NULL AND status = 'sent' AND target_object_type IS NOT NULL LIMIT 1;", (payload.target_id,)).fetchone()
+        if row is None:
+            row = connection.execute("SELECT * FROM chat_messages WHERE target_object_id = ? AND deleted_at IS NULL AND status = 'sent' LIMIT 1;", (payload.target_id,)).fetchone()
+        if row is None:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+        member = connection.execute("SELECT 1 FROM chat_conversation_members WHERE conversation_id = ? AND user_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1;", (row["conversation_id"], user_id)).fetchone()
+        if member is None or not row["target_object_type"] or not resolve_business_object_access(connection, row["target_object_type"], row["target_object_id"], user_id).can_preview:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+        return row
+    row = connection.execute("SELECT messages.* FROM chat_message_attachments attachments JOIN chat_messages messages ON messages.message_id = attachments.message_id WHERE attachments.media_id = ? AND messages.deleted_at IS NULL AND messages.status = 'sent' LIMIT 1;", (payload.target_id,)).fetchone()
+    if row is None:
+        raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+    member = connection.execute("SELECT 1 FROM chat_conversation_members WHERE conversation_id = ? AND user_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1;", (row["conversation_id"], user_id)).fetchone()
+    if member is None:
+        raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_TARGET_NOT_FOUND", "The reported target was not found.")
+    return row
+
+
+def create_message_report(user_id: str, payload: MessageReportCreate) -> MessageReportResponse:
+    with transaction() as connection:
+        _ensure_active_user(connection, user_id)
+        message = _validate_message_report_target(connection, user_id, payload)
+        existing = connection.execute("SELECT * FROM message_moderation_reports WHERE reporter_user_id = ? AND idempotency_key = ? LIMIT 1;", (user_id, payload.idempotency_key)).fetchone()
+        if existing is not None:
+            if existing["target_kind"] != payload.target_kind or existing["target_id"] != payload.target_id or existing["reason_code"] != payload.reason_code:
+                raise_api_error(status.HTTP_409_CONFLICT, "REPORT_IDEMPOTENCY_CONFLICT", "The idempotency key is already bound to another report.")
+            return MessageReportResponse(success=True, report=_message_report_record(existing))
+        report_id = str(uuid.uuid4())
+        connection.execute("INSERT INTO message_moderation_reports (report_id, reporter_user_id, target_kind, target_id, conversation_id, message_id, object_type, reason_code, description, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", (report_id, user_id, payload.target_kind, payload.target_id, message["conversation_id"], message["message_id"], message["target_object_type"], payload.reason_code, payload.description, payload.idempotency_key))
+        row = connection.execute("SELECT * FROM message_moderation_reports WHERE report_id = ?;", (report_id,)).fetchone()
+    return MessageReportResponse(success=True, report=_message_report_record(row))
+
+
+def list_message_reports(page: int, page_size: int, status_filter: str | None = None) -> MessageReportListResponse:
+    with get_connection() as connection:
+        sql = "SELECT * FROM message_moderation_reports"
+        params: list[Any] = []
+        if status_filter:
+            sql += " WHERE status = ?"; params.append(status_filter)
+        sql += " ORDER BY created_at DESC, report_id DESC LIMIT ? OFFSET ?;"; params.extend([page_size, (page - 1) * page_size])
+        rows = connection.execute(sql, tuple(params)).fetchall()
+    return MessageReportListResponse(items=[_message_report_record(row) for row in rows], page=page, page_size=page_size)
+
+
+def update_message_report(report_id: str, actor_user_id: str, payload: MessageReportUpdate) -> MessageReportResponse:
+    allowed = {"open": {"under_review", "rejected", "closed"}, "under_review": {"resolved", "rejected", "closed"}, "resolved": set(), "rejected": set(), "closed": set()}
+    with transaction() as connection:
+        row = connection.execute("SELECT * FROM message_moderation_reports WHERE report_id = ? LIMIT 1;", (report_id,)).fetchone()
+        if row is None:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "REPORT_NOT_FOUND", "Report was not found.")
+        if payload.status == row["status"]:
+            return MessageReportResponse(success=True, report=_message_report_record(row))
+        if payload.status not in allowed.get(row["status"], set()):
+            raise_api_error(status.HTTP_409_CONFLICT, "REPORT_STATUS_INVALID", "The report status transition is invalid.")
+        now = utc_now_iso() if payload.status in {"resolved", "rejected", "closed"} else None
+        connection.execute("UPDATE message_moderation_reports SET status = ?, resolved_at = ?, resolved_by = ?, resolution_code = ?, updated_at = CURRENT_TIMESTAMP WHERE report_id = ?;", (payload.status, now, actor_user_id if now else None, payload.resolution_code, report_id))
+        connection.execute("INSERT INTO message_moderation_audit_logs (audit_id, report_id, actor_user_id, previous_status, next_status, resolution_code) VALUES (?, ?, ?, ?, ?, ?);", (str(uuid.uuid4()), report_id, actor_user_id, row["status"], payload.status, payload.resolution_code))
+        updated = connection.execute("SELECT * FROM message_moderation_reports WHERE report_id = ?;", (report_id,)).fetchone()
+    return MessageReportResponse(success=True, report=_message_report_record(updated))

@@ -15,12 +15,10 @@ for fragment in (
 
 for fragment in (
     "function BusinessObjectMessageCard",
-    'card.object_type !== "social_post"',
-    "function PostShareMessageCard",
-    'pathname: "/post/[id]"',
-    'accessibilityLabel={unavailable ? "分享内容不可用" : "查看分享的动态"}',
-    "disabled={unavailable}",
-    "内容不可用",
+    "messageBusinessObjectCardModel(card)",
+    '"@/messages/businessObjectCard"',
+    "disabled={!model.destination}",
+    "分享了{model.label}",
     "onError={() => setCoverFailed(true)}",
     "numberOfLines={2}",
 ):

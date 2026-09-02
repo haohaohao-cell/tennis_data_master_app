@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+import base64
+import binascii
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,6 +14,7 @@ from fastapi import status
 
 from backend.app.auth.service import raise_api_error
 from backend.app.core.database import get_connection, transaction
+from backend.app.core.config import settings
 from backend.app.core.time import to_iso, utc_now, utc_now_iso
 from backend.app.messages.schemas import (
     ChatConversationRecord,
@@ -32,15 +37,25 @@ from backend.app.messages.schemas import (
     MarkReadResponse,
     MessageAttachmentRecord,
     MessageCreate,
+    MessageEdit,
+    MessageForwardCreate,
+    MessageForwardResponse,
     MessageListResponse,
+    MessageReactionCreate,
+    MessageReactionSummary,
     MessageReconcileRequest,
     MessageReconcileResponse,
+    MessageSearchResult,
+    MessageMediaSearchSummary,
     MessageRequestActionResponse,
     MessageRequestCreate,
     MessageRequestListResponse,
     MessageRequestRecord,
     MessageReplyPreview,
     MessageSendResponse,
+    GroupMemberActionResponse,
+    GroupMemberAdd,
+    GroupMemberRoleUpdate,
     MessageUserSummary,
     PostShareCard,
     PostShareCardAuthor,
@@ -57,6 +72,8 @@ from backend.app.messages.schemas import (
 )
 from backend.app.messages import media_service
 from backend.app.messages import outbox
+from backend.app.messages import sync as sync_service
+from backend.app.messages.business_object_access import resolve_business_object_access
 from backend.app.messages.media_storage import storage_path
 
 
@@ -921,6 +938,95 @@ def create_group_conversation(
         return _conversation_create_response(connection, conversation_id, user_id)
 
 
+def _ensure_group_manager(connection: sqlite3.Connection, conversation_id: str, user_id: str) -> sqlite3.Row:
+    conversation = _select_conversation(connection, conversation_id)
+    if conversation["conversation_type"] != "group":
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "GROUP_CONVERSATION_REQUIRED", "This operation requires a group conversation.")
+    member = _select_member(connection, conversation_id, user_id)
+    if member["member_role"] not in {"owner", "admin"}:
+        raise_api_error(status.HTTP_403_FORBIDDEN, "GROUP_ADMIN_REQUIRED", "A group owner or admin is required.")
+    return member
+
+
+def _append_group_change_event(
+    connection: sqlite3.Connection,
+    conversation_id: str,
+    actor_user_id: str,
+    changed_fields: list[str],
+) -> str:
+    event_id = str(uuid.uuid4())
+    sync_service.append_conversation_event(
+        connection, event_id=event_id, event_type="conversation.members_changed", conversation_id=conversation_id,
+        actor_user_id=actor_user_id, aggregate_type="chat_conversation", message_id=None, message_seq=None,
+        occurred_at=utc_now_iso(), changed_fields=changed_fields,
+    )
+    return event_id
+
+
+def add_group_member(user_id: str, conversation_id: str, payload: GroupMemberAdd) -> GroupMemberActionResponse:
+    with transaction(immediate=True, lock_key=f"group-members:{conversation_id}") as connection:
+        _ensure_active_user(connection, user_id)
+        _ensure_group_manager(connection, conversation_id, user_id)
+        _ensure_active_user(connection, payload.user_id)
+        if payload.user_id != user_id:
+            _ensure_not_blocked(connection, user_id, payload.user_id)
+        existing = connection.execute(
+            "SELECT * FROM chat_conversation_members WHERE conversation_id = ? AND user_id = ? AND deleted_at IS NULL;",
+            (conversation_id, payload.user_id),
+        ).fetchone()
+        member = _ensure_membership(connection, conversation_id, payload.user_id, "member")
+        changed = existing is None or existing["status"] != "active"
+        event_id = _append_group_change_event(connection, conversation_id, user_id, ["members"]) if changed else None
+        return GroupMemberActionResponse(success=True, conversation_id=conversation_id, member=_member_record(member), event_id=event_id)
+
+
+def remove_group_member(user_id: str, conversation_id: str, target_user_id: str) -> GroupMemberActionResponse:
+    with transaction(immediate=True, lock_key=f"group-members:{conversation_id}") as connection:
+        actor = _ensure_group_manager(connection, conversation_id, user_id)
+        target = _select_member(connection, conversation_id, target_user_id)
+        if target_user_id == user_id:
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "GROUP_SELF_REMOVE_USE_LEAVE", "Use the leave endpoint to remove yourself.")
+        if target["member_role"] == "owner" or (actor["member_role"] != "owner" and target["member_role"] == "admin"):
+            raise_api_error(status.HTTP_403_FORBIDDEN, "GROUP_MEMBER_REMOVE_NOT_ALLOWED", "This member cannot be removed by the current role.")
+        connection.execute(
+            "UPDATE chat_conversation_members SET status = 'removed', left_at = ? WHERE conversation_member_id = ?;",
+            (utc_now_iso(), target["conversation_member_id"]),
+        )
+        event_id = _append_group_change_event(connection, conversation_id, user_id, ["members"])
+        return GroupMemberActionResponse(success=True, conversation_id=conversation_id, member=_member_record(_select_member(connection, conversation_id, target_user_id, require_active=False)), event_id=event_id)
+
+
+def leave_group(user_id: str, conversation_id: str) -> GroupMemberActionResponse:
+    with transaction(immediate=True, lock_key=f"group-members:{conversation_id}") as connection:
+        conversation = _select_conversation(connection, conversation_id)
+        if conversation["conversation_type"] != "group":
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "GROUP_CONVERSATION_REQUIRED", "This operation requires a group conversation.")
+        member = _select_member(connection, conversation_id, user_id)
+        if member["member_role"] == "owner":
+            raise_api_error(status.HTTP_409_CONFLICT, "GROUP_OWNER_TRANSFER_REQUIRED", "Transfer ownership before leaving the group.")
+        connection.execute(
+            "UPDATE chat_conversation_members SET status = 'left', left_at = ? WHERE conversation_member_id = ?;",
+            (utc_now_iso(), member["conversation_member_id"]),
+        )
+        event_id = _append_group_change_event(connection, conversation_id, user_id, ["members"])
+        return GroupMemberActionResponse(success=True, conversation_id=conversation_id, member=_member_record(_select_member(connection, conversation_id, user_id, require_active=False)), event_id=event_id)
+
+
+def update_group_member_role(user_id: str, conversation_id: str, target_user_id: str, payload: GroupMemberRoleUpdate) -> GroupMemberActionResponse:
+    with transaction(immediate=True, lock_key=f"group-members:{conversation_id}") as connection:
+        actor = _ensure_group_manager(connection, conversation_id, user_id)
+        if actor["member_role"] != "owner":
+            raise_api_error(status.HTTP_403_FORBIDDEN, "GROUP_OWNER_REQUIRED", "Only the group owner can change administrator roles.")
+        target = _select_member(connection, conversation_id, target_user_id)
+        if target["member_role"] == "owner":
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "GROUP_OWNER_ROLE_IMMUTABLE", "The group owner role cannot be changed here.")
+        event_id = None
+        if target["member_role"] != payload.member_role:
+            connection.execute("UPDATE chat_conversation_members SET member_role = ? WHERE conversation_member_id = ?;", (payload.member_role, target["conversation_member_id"]))
+            event_id = _append_group_change_event(connection, conversation_id, user_id, ["members", "member_role"])
+        return GroupMemberActionResponse(success=True, conversation_id=conversation_id, member=_member_record(_select_member(connection, conversation_id, target_user_id)), event_id=event_id)
+
+
 def list_conversations(user_id: str, page: int, page_size: int) -> ConversationListResponse:
     offset = (page - 1) * page_size
     with get_connection() as connection:
@@ -1303,6 +1409,8 @@ def _batch_social_post_cards(
             object_type="social_post",
             object_id=post_id,
             state="unavailable",
+            access="denied",
+            object_state="unavailable",
             unavailable_reason="not_found_or_no_access",
         )
         for post_id in post_ids
@@ -1401,6 +1509,12 @@ def _batch_social_post_cards(
             object_type="social_post",
             object_id=post_id,
             state="available",
+            access="allowed",
+            object_state="active",
+            can_preview=True,
+            can_open=True,
+            can_forward=False,
+            safe_summary=(post["content"] or "")[:280] or None,
             title=(post["title"] or "网球动态")[:120],
             summary=(post["content"] or "")[:280] or None,
             cover_url=covers.get(post_id),
@@ -1424,16 +1538,39 @@ def hydrate_business_object_card(
         return None
     object_type = row["target_object_type"]
     object_id = row["target_object_id"]
-    if object_type not in {"social_post", "video", "tennis_activity", "lesson", "analysis"}:
-        return None
-    if object_type != "social_post":
+    if object_type == "social_post":
+        return _batch_social_post_cards(connection, {object_id}, viewer_user_id).get(object_id)
+    if object_type not in {"video", "tennis_activity", "lesson", "analysis"}:
         return BusinessObjectCard(
             object_type=object_type,
             object_id=object_id,
             state="unsupported",
+            access="not_found",
+            object_state="unavailable",
             unavailable_reason="unsupported_object_type",
         )
-    return _batch_social_post_cards(connection, {object_id}, viewer_user_id).get(object_id)
+    result = resolve_business_object_access(connection, object_type, object_id, viewer_user_id)
+    if result.state == "deleted":
+        unavailable_reason = "deleted"
+    elif object_type == "video" and result.access == "allowed" and result.state == "unavailable":
+        unavailable_reason = "media_unavailable"
+    else:
+        unavailable_reason = "not_found_or_no_access"
+    return BusinessObjectCard(
+        object_type=result.object_type,
+        object_id=result.object_id,
+        state="available" if result.can_preview else "unavailable",
+        access=result.access,
+        object_state=result.state,
+        can_preview=result.can_preview,
+        can_open=result.can_open,
+        can_forward=result.can_forward,
+        safe_summary=result.safe_summary,
+        title=result.title if result.can_preview else None,
+        summary=result.safe_summary if result.can_preview else None,
+        metadata=result.metadata or {},
+        unavailable_reason=None if result.can_preview else unavailable_reason,
+    )
 
 
 def _legacy_post_share_card(card: BusinessObjectCard | None) -> PostShareCard | None:
@@ -1464,6 +1601,28 @@ def _select_message(connection: sqlite3.Connection, message_id: str) -> sqlite3.
     if row is None:
         raise_api_error(status.HTTP_404_NOT_FOUND, "MESSAGE_NOT_FOUND", "Message was not found.")
     return row
+
+
+def _reaction_summaries(connection: sqlite3.Connection, message_id: str, viewer_user_id: str | None) -> list[MessageReactionSummary]:
+    rows = connection.execute(
+        """
+        SELECT reaction_type, COUNT(*) AS reaction_count,
+               MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS reacted_by_viewer
+        FROM chat_message_reactions
+        WHERE message_id = ?
+        GROUP BY reaction_type
+        ORDER BY reaction_type ASC;
+        """,
+        (viewer_user_id, message_id),
+    ).fetchall()
+    return [
+        MessageReactionSummary(
+            reaction_type=row["reaction_type"],
+            count=int(row["reaction_count"]),
+            reacted_by_current_user=bool(row["reacted_by_viewer"]),
+        )
+        for row in rows
+    ]
 
 
 def _message_record(
@@ -1539,11 +1698,13 @@ def _message_record(
         context_object_id=None if is_revoked else row["context_object_id"],
         reply_to_message_id=row["reply_to_message_id"],
         reply_preview=reply_preview,
+        reactions=[] if is_revoked else _reaction_summaries(connection, row["message_id"], viewer_user_id),
         business_object_card=business_object_card,
         share_card=_legacy_post_share_card(business_object_card) if row["message_type"] == "post_share" else None,
         client_message_id=row["client_message_id"],
         status=row["status"],
         sent_at=row["sent_at"],
+        edited_at=row["edited_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         deleted_at=row["deleted_at"],
@@ -1698,11 +1859,13 @@ def _message_records(
                 context_object_id=None if is_revoked else row["context_object_id"],
                 reply_to_message_id=reply_id,
                 reply_preview=reply_preview,
+                reactions=[] if is_revoked else _reaction_summaries(connection, row["message_id"], viewer_user_id),
                 business_object_card=business_object_card,
                 share_card=_legacy_post_share_card(business_object_card) if row["message_type"] == "post_share" else None,
                 client_message_id=row["client_message_id"],
                 status=row["status"],
                 sent_at=row["sent_at"],
+                edited_at=row["edited_at"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 deleted_at=row["deleted_at"],
@@ -1968,6 +2131,18 @@ def send_message_in_transaction(
 
     persisted_message = _select_message(connection, message_id)
     event_id = outbox.create_message_event(connection, persisted_message, user_id)
+    sync_service.append_conversation_event(
+        connection,
+        event_id=event_id,
+        event_type="message.created",
+        conversation_id=conversation_id,
+        actor_user_id=user_id,
+        aggregate_type="chat_message",
+        message_id=message_id,
+        message_seq=message_seq,
+        occurred_at=persisted_message["created_at"],
+        changed_fields=["message_id", "message_seq"],
+    )
     return MessageSendResponse(
         message=_message_record(connection, persisted_message, user_id),
         event_id=event_id,
@@ -2061,6 +2236,7 @@ def recall_message(user_id: str, conversation_id: str, message_id: str) -> Messa
                 "MESSAGE_RECALL_TERMINAL",
                 "This message cannot be recalled.",
             )
+        did_recall = False
         if row["status"] == "sent":
             connection.execute(
                 """
@@ -2071,6 +2247,7 @@ def recall_message(user_id: str, conversation_id: str, message_id: str) -> Messa
                 """,
                 (message_id,),
             )
+            did_recall = True
             if conversation["last_message_id"] == message_id:
                 connection.execute(
                     """
@@ -2081,7 +2258,227 @@ def recall_message(user_id: str, conversation_id: str, message_id: str) -> Messa
                     """,
                     (conversation_id, message_id),
                 )
-        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id), user_id))
+        recall_event_id = None
+        if did_recall:
+            recall_event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection,
+                event_id=recall_event_id,
+                event_type="message.recalled",
+                conversation_id=conversation_id,
+                actor_user_id=user_id,
+                aggregate_type="chat_message",
+                message_id=message_id,
+                message_seq=row["message_seq"],
+                occurred_at=utc_now_iso(),
+                changed_fields=["message_id", "status"],
+            )
+        return MessageSendResponse(
+            message=_message_record(connection, _select_message(connection, message_id), user_id),
+            event_id=recall_event_id,
+        )
+
+
+def edit_message(user_id: str, conversation_id: str, message_id: str, payload: MessageEdit) -> MessageSendResponse:
+    """Edit only a sender-owned, live text message without changing its sequence."""
+    with transaction(immediate=True, lock_key=f"message:{conversation_id}") as connection:
+        _ensure_active_user(connection, user_id)
+        _select_member(connection, conversation_id, user_id)
+        row = _select_message(connection, message_id)
+        if row["conversation_id"] != conversation_id:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "MESSAGE_NOT_FOUND", "Message was not found.")
+        if row["sender_user_id"] != user_id:
+            raise_api_error(status.HTTP_403_FORBIDDEN, "MESSAGE_EDIT_NOT_ALLOWED", "Only the original sender can edit this message.")
+        if row["message_type"] != "text":
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_EDIT_TEXT_ONLY", "Only text messages can be edited.")
+        if row["status"] != "sent" or row["deleted_at"] is not None:
+            raise_api_error(status.HTTP_409_CONFLICT, "MESSAGE_EDIT_TERMINAL", "This message can no longer be edited.")
+        event_id = None
+        if row["text_content"] != payload.text_content:
+            edited_at = utc_now_iso()
+            connection.execute(
+                "UPDATE chat_messages SET text_content = ?, edited_at = ? WHERE message_id = ?;",
+                (payload.text_content, edited_at, message_id),
+            )
+            event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection, event_id=event_id, event_type="message.edited", conversation_id=conversation_id,
+                actor_user_id=user_id, aggregate_type="chat_message", message_id=message_id,
+                message_seq=row["message_seq"], occurred_at=edited_at,
+                changed_fields=["message_id", "text_content", "edited_at"],
+            )
+        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id), user_id), event_id=event_id)
+
+
+def set_message_reaction(
+    user_id: str,
+    conversation_id: str,
+    message_id: str,
+    payload: MessageReactionCreate,
+) -> MessageSendResponse:
+    """Upsert a viewer's single reaction; same type is intentionally idempotent."""
+    with transaction(immediate=True, lock_key=f"message-reaction:{message_id}:{user_id}") as connection:
+        _ensure_active_user(connection, user_id)
+        _select_member(connection, conversation_id, user_id)
+        row = _select_message(connection, message_id)
+        if row["conversation_id"] != conversation_id:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "MESSAGE_NOT_FOUND", "Message was not found.")
+        if row["status"] != "sent" or row["deleted_at"] is not None:
+            raise_api_error(status.HTTP_409_CONFLICT, "MESSAGE_REACTION_UNAVAILABLE", "This message cannot be reacted to.")
+        existing = connection.execute(
+            "SELECT reaction_type FROM chat_message_reactions WHERE message_id = ? AND user_id = ?;",
+            (message_id, user_id),
+        ).fetchone()
+        event_id = None
+        if existing is None:
+            connection.execute(
+                "INSERT INTO chat_message_reactions (reaction_id, message_id, user_id, reaction_type) VALUES (?, ?, ?, ?);",
+                (str(uuid.uuid4()), message_id, user_id, payload.reaction_type),
+            )
+        elif existing["reaction_type"] != payload.reaction_type:
+            connection.execute(
+                "UPDATE chat_message_reactions SET reaction_type = ? WHERE message_id = ? AND user_id = ?;",
+                (payload.reaction_type, message_id, user_id),
+            )
+        if existing is None or existing["reaction_type"] != payload.reaction_type:
+            event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection, event_id=event_id, event_type="message.reaction_changed", conversation_id=conversation_id,
+                actor_user_id=user_id, aggregate_type="chat_message", message_id=message_id,
+                message_seq=row["message_seq"], occurred_at=utc_now_iso(), changed_fields=["message_id", "reactions"],
+            )
+        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id), user_id), event_id=event_id)
+
+
+def remove_message_reaction(user_id: str, conversation_id: str, message_id: str) -> MessageSendResponse:
+    with transaction(immediate=True, lock_key=f"message-reaction:{message_id}:{user_id}") as connection:
+        _ensure_active_user(connection, user_id)
+        _select_member(connection, conversation_id, user_id)
+        row = _select_message(connection, message_id)
+        if row["conversation_id"] != conversation_id:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "MESSAGE_NOT_FOUND", "Message was not found.")
+        deleted = connection.execute(
+            "DELETE FROM chat_message_reactions WHERE message_id = ? AND user_id = ?;", (message_id, user_id)
+        ).rowcount
+        event_id = None
+        if deleted:
+            event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection, event_id=event_id, event_type="message.reaction_changed", conversation_id=conversation_id,
+                actor_user_id=user_id, aggregate_type="chat_message", message_id=message_id,
+                message_seq=row["message_seq"], occurred_at=utc_now_iso(), changed_fields=["message_id", "reactions"],
+            )
+        return MessageSendResponse(message=_message_record(connection, _select_message(connection, message_id), user_id), event_id=event_id)
+
+
+def forward_message(
+    user_id: str,
+    source_conversation_id: str,
+    message_id: str,
+    payload: MessageForwardCreate,
+) -> MessageForwardResponse:
+    """Atomically forward a live text or supported object reference.
+
+    Object forwards retain only the existing reference. Every target member is
+    checked against the current object adapter before any message is written.
+    Chat-upload media remains intentionally non-forwardable: it is bound to
+    one message/conversation and has no reusable cross-conversation grant.
+    """
+    with transaction(immediate=True, lock_key=f"message-forward:{user_id}:{payload.client_forward_id}") as connection:
+        _ensure_active_user(connection, user_id)
+        _select_member(connection, source_conversation_id, user_id)
+        source = _select_message(connection, message_id)
+        if source["conversation_id"] != source_conversation_id:
+            raise_api_error(status.HTTP_404_NOT_FOUND, "MESSAGE_NOT_FOUND", "Message was not found.")
+        if source["sender_user_id"] != user_id:
+            raise_api_error(status.HTTP_403_FORBIDDEN, "MESSAGE_FORWARD_NOT_ALLOWED", "Only the original sender can forward this message.")
+        if source["status"] != "sent" or source["deleted_at"] is not None:
+            raise_api_error(status.HTTP_409_CONFLICT, "MESSAGE_FORWARD_UNAVAILABLE", "This message can no longer be forwarded.")
+        is_plain_text = source["message_type"] == "text" and not source["target_object_id"] and not source["context_object_id"]
+        is_object_reference = (
+            source["message_type"] == "text"
+            and source["target_object_type"] in {"tennis_activity", "lesson", "video"}
+            and source["target_object_id"] is not None
+            and source["context_object_id"] is None
+        )
+        if source["target_object_type"] == "analysis":
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_FORWARD_OBJECT_UNSUPPORTED", "Analysis references cannot be forwarded without an analysis contract.")
+        if not is_plain_text and not is_object_reference:
+            raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_FORWARD_TYPE_UNSUPPORTED", "Only plain text and authorized Activity, Lesson, or Video references can be forwarded.")
+        if is_object_reference:
+            source_access = resolve_business_object_access(connection, source["target_object_type"], source["target_object_id"], user_id)
+            if not source_access.can_forward:
+                raise_api_error(status.HTTP_409_CONFLICT, "MESSAGE_FORWARD_OBJECT_UNAVAILABLE", "The referenced object is not available for forwarding.")
+
+        target_ids = payload.target_conversation_ids
+        # Validate every target before writing so a multi-target request has no
+        # partial success path and retains a clear all-or-nothing contract.
+        for target_id in target_ids:
+            _select_conversation(connection, target_id)
+            _select_member(connection, target_id, user_id)
+            if is_object_reference:
+                target_members = connection.execute(
+                    """
+                    SELECT user_id FROM chat_conversation_members
+                    WHERE conversation_id = ? AND status = 'active' AND deleted_at IS NULL;
+                    """,
+                    (target_id,),
+                ).fetchall()
+                for target_member in target_members:
+                    member_user_id = target_member["user_id"]
+                    if member_user_id != user_id:
+                        _ensure_not_blocked(connection, user_id, member_user_id)
+                    member_access = resolve_business_object_access(
+                        connection, source["target_object_type"], source["target_object_id"], member_user_id
+                    )
+                    if not member_access.can_preview:
+                        raise_api_error(status.HTTP_403_FORBIDDEN, "MESSAGE_FORWARD_TARGET_OBJECT_FORBIDDEN", "A target conversation member cannot access this object.")
+
+        items: list[MessageSendResponse] = []
+        event_ids: list[str] = []
+        for target_id in target_ids:
+            existing = connection.execute(
+                """
+                SELECT forwarded_message_id FROM chat_message_forwards
+                WHERE sender_user_id = ? AND client_forward_id = ? AND target_conversation_id = ?;
+                """,
+                (user_id, payload.client_forward_id, target_id),
+            ).fetchone()
+            if existing is not None:
+                forwarded = _select_message(connection, existing["forwarded_message_id"])
+                event = outbox.event_for_message(connection, forwarded["message_id"])
+                items.append(MessageSendResponse(message=_message_record(connection, forwarded, user_id), event_id=event["event_id"] if event else None))
+                continue
+            client_message_id = f"forward:{uuid.uuid5(uuid.NAMESPACE_URL, f'{user_id}:{payload.client_forward_id}:{target_id}') }"
+            sent = send_message_in_transaction(
+                connection,
+                user_id,
+                target_id,
+                MessageCreate(
+                    message_type="text",
+                    text_content=source["text_content"],
+                    target_object_type=source["target_object_type"] if is_object_reference else None,
+                    target_object_id=source["target_object_id"] if is_object_reference else None,
+                    client_message_id=client_message_id,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO chat_message_forwards (
+                    forward_id, source_message_id, forwarded_message_id, target_conversation_id, sender_user_id, client_forward_id
+                ) VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (str(uuid.uuid4()), message_id, sent.message.message_id, target_id, user_id, payload.client_forward_id),
+            )
+            forward_event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection, event_id=forward_event_id, event_type="message.forwarded", conversation_id=target_id,
+                actor_user_id=user_id, aggregate_type="chat_message", message_id=sent.message.message_id,
+                message_seq=sent.message.message_seq, occurred_at=utc_now_iso(), changed_fields=["message_id", "forwarded"],
+            )
+            items.append(sent)
+            event_ids.extend([event_id for event_id in (sent.event_id, forward_event_id) if event_id])
+        return MessageForwardResponse(source_message_id=message_id, items=items, event_ids=event_ids)
 
 
 def _request_user_summary(connection: sqlite3.Connection, user_id: str) -> MessageUserSummary:
@@ -2469,20 +2866,119 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _message_search_cursor_signature(encoded_body: str) -> str:
+    return hmac.new(
+        settings.resolved_message_sync_cursor_secret().encode("utf-8"),
+        encoded_body.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _message_search_filter_key(
+    query: str,
+    sender_user_id: str | None,
+    message_type: str | None,
+    object_type: str | None,
+    object_id: str | None,
+    has_media: bool | None,
+    sent_after: str | None,
+    sent_before: str | None,
+) -> str:
+    """Canonicalize filters before binding a search cursor to its request."""
+    return json.dumps(
+        {
+            "q": query,
+            "sender": sender_user_id,
+            "message_type": message_type,
+            "object_type": object_type,
+            "object_id": object_id,
+            "has_media": has_media,
+            "sent_after": sent_after,
+            "sent_before": sent_before,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _encode_message_search_cursor(user_id: str, conversation_id: str, filter_key: str, message_seq: int) -> str:
+    body = json.dumps(
+        {"v": 1, "u": user_id, "c": conversation_id, "f": filter_key, "s": message_seq},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    encoded_body = base64.urlsafe_b64encode(body).decode("ascii").rstrip("=")
+    return f"{encoded_body}.{_message_search_cursor_signature(encoded_body)}"
+
+
+def _decode_message_search_cursor(cursor: str, user_id: str, conversation_id: str, filter_key: str) -> int:
+    try:
+        encoded_body, signature = cursor.split(".", 1)
+        if not hmac.compare_digest(signature, _message_search_cursor_signature(encoded_body)):
+            raise ValueError("signature")
+        padded = encoded_body + "=" * (-len(encoded_body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("v") != 1
+            or payload.get("u") != user_id
+            or payload.get("c") != conversation_id
+            or payload.get("f") != filter_key
+            or not isinstance(payload.get("s"), int)
+            or payload["s"] < 1
+        ):
+            raise ValueError("claims")
+        return payload["s"]
+    except (AttributeError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error):
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_CURSOR_INVALID", "The search cursor is invalid.")
+        raise AssertionError("unreachable")
+
+
+def _search_highlight(text_content: str | None, query: str) -> str | None:
+    if not text_content or not query:
+        return None
+    position = text_content.lower().find(query.lower())
+    if position < 0:
+        return None
+    start = max(0, position - 60)
+    end = min(len(text_content), position + len(query) + 120)
+    return text_content[start:end]
+
+
+def _search_media_summary(record: ChatMessageRecord) -> MessageMediaSearchSummary | None:
+    media_attachments = [attachment for attachment in record.attachments if attachment.media_id]
+    if not media_attachments:
+        return None
+    media_types = sorted({attachment.attachment_type for attachment in media_attachments if attachment.attachment_type in {"image", "video"}})
+    return MessageMediaSearchSummary(
+        attachment_count=len(media_attachments),
+        media_types=media_types,
+        states=sorted({attachment.media_state for attachment in media_attachments if attachment.media_state}),
+    )
+
+
 def search_conversation_messages(
     user_id: str,
     conversation_id: str,
     query: str,
     page_size: int,
     before_seq: int | None,
+    cursor: str | None = None,
+    sender_user_id: str | None = None,
+    message_type: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    has_media: bool | None = None,
+    sent_after: str | None = None,
+    sent_before: str | None = None,
 ) -> ConversationMessageSearchResponse:
-    """Search persisted text messages in one authorized conversation without read side effects."""
+    """Search authorized messages with current object/media hydration and stable cursors."""
     normalized_query = query.strip()
-    if not normalized_query:
+    if not normalized_query and not any((message_type, object_type, object_id, sender_user_id, has_media is not None, sent_after, sent_before)):
         raise_api_error(
             status.HTTP_400_BAD_REQUEST,
             "MESSAGE_SEARCH_QUERY_REQUIRED",
-            "Search query cannot be empty.",
+            "Provide text or at least one supported search filter.",
         )
     if len(normalized_query) > 100:
         raise_api_error(
@@ -2490,33 +2986,82 @@ def search_conversation_messages(
             "MESSAGE_SEARCH_QUERY_TOO_LONG",
             "Search query must be at most 100 characters.",
         )
+    if cursor and before_seq is not None:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_CURSOR_CONFLICT", "Use either cursor or before_seq, not both.")
+    allowed_message_types = {"text", "image", "video", "audio", "file", "post_share", "video_share", "activity_share", "lesson_share", "analysis_card", "system_event", "custom"}
+    allowed_object_types = {"user", "video", "social_post", "tennis_activity", "lesson", "analysis", "custom"}
+    if message_type and message_type not in allowed_message_types:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_FILTER_INVALID", "message_type is invalid.")
+    if object_type and object_type not in allowed_object_types:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_FILTER_INVALID", "object_type is invalid.")
+    if object_id and not object_type:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_FILTER_INVALID", "object_id requires object_type.")
+    if sent_after and sent_before and sent_after > sent_before:
+        raise_api_error(status.HTTP_400_BAD_REQUEST, "MESSAGE_SEARCH_TIME_RANGE_INVALID", "sent_after must not be later than sent_before.")
+    filter_key = _message_search_filter_key(normalized_query, sender_user_id, message_type, object_type, object_id, has_media, sent_after, sent_before)
 
     with get_connection() as connection:
         _ensure_active_user(connection, user_id)
         _select_conversation(connection, conversation_id)
         _select_member(connection, conversation_id, user_id)
+        cursor_before_seq = _decode_message_search_cursor(cursor, user_id, conversation_id, filter_key) if cursor else before_seq
         sql = """
             SELECT *
             FROM chat_messages
             WHERE conversation_id = ?
-              AND message_type IN ('text', 'post_share')
               AND status = 'sent'
-              AND text_content LIKE ? ESCAPE '\\'
               AND deleted_at IS NULL
         """
-        params: list[object] = [conversation_id, f"%{_escape_like(normalized_query)}%"]
-        if before_seq is not None:
+        params: list[object] = [conversation_id]
+        if normalized_query:
+            # Explicit case folding keeps SQLite and PostgreSQL search semantics identical.
+            sql += " AND LOWER(text_content) LIKE LOWER(?) ESCAPE '\\'"
+            params.append(f"%{_escape_like(normalized_query)}%")
+        if sender_user_id:
+            sql += " AND sender_user_id = ?"
+            params.append(sender_user_id)
+        if message_type:
+            sql += " AND message_type = ?"
+            params.append(message_type)
+        if object_type:
+            sql += " AND target_object_type = ?"
+            params.append(object_type)
+        if object_id:
+            sql += " AND target_object_id = ?"
+            params.append(object_id)
+        if sent_after:
+            sql += " AND sent_at >= ?"
+            params.append(sent_after)
+        if sent_before:
+            sql += " AND sent_at <= ?"
+            params.append(sent_before)
+        if has_media is not None:
+            exists_sql = "EXISTS" if has_media else "NOT EXISTS"
+            sql += f" AND {exists_sql} (SELECT 1 FROM chat_message_attachments AS search_attachment WHERE search_attachment.message_id = chat_messages.message_id AND search_attachment.media_id IS NOT NULL)"
+        if cursor_before_seq is not None:
             sql += " AND message_seq < ?"
-            params.append(before_seq)
+            params.append(cursor_before_seq)
         sql += " ORDER BY message_seq DESC LIMIT ?;"
         params.append(page_size)
         rows = connection.execute(sql, tuple(params)).fetchall()
-        items = _message_records(connection, rows, user_id)
+        records = _message_records(connection, rows, user_id)
+
+    items: list[MessageSearchResult] = []
+    for record in records:
+        if normalized_query:
+            match_kind = "text"
+        elif object_type:
+            match_kind = "business_object"
+        else:
+            match_kind = "media"
+        items.append(MessageSearchResult(**record.model_dump(), match_kind=match_kind, highlight=_search_highlight(record.text_content, normalized_query), media_summary=_search_media_summary(record)))
+    next_before_seq = rows[-1]["message_seq"] if len(rows) == page_size else None
 
     return ConversationMessageSearchResponse(
         conversation_id=conversation_id,
         items=items,
-        next_before_seq=rows[-1]["message_seq"] if len(rows) == page_size else None,
+        next_cursor=_encode_message_search_cursor(user_id, conversation_id, filter_key, next_before_seq) if next_before_seq is not None else None,
+        next_before_seq=next_before_seq,
     )
 
 
@@ -2525,10 +3070,12 @@ def mark_conversation_read(
     conversation_id: str,
     payload: MarkReadRequest | None = None,
 ) -> MarkReadResponse:
+    event_id = None
     with transaction(immediate=True, lock_key=f"conversation-read:{conversation_id}:{user_id}") as connection:
         _ensure_active_user(connection, user_id)
         conversation = _select_conversation(connection, conversation_id)
         member = _select_member(connection, conversation_id, user_id)
+        previous_last_read_message_seq = member["last_read_message_seq"]
         previous_unread = member["unread_count"]
         requested_seq = (
             conversation["last_message_seq"]
@@ -2587,11 +3134,26 @@ def mark_conversation_read(
                 conversation["conversation_type"],
                 -counter_delta,
             )
+        if target_seq > previous_last_read_message_seq:
+            event_id = str(uuid.uuid4())
+            sync_service.append_conversation_event(
+                connection,
+                event_id=event_id,
+                event_type="conversation.read",
+                conversation_id=conversation_id,
+                actor_user_id=user_id,
+                aggregate_type="chat_conversation",
+                message_id=target_message["message_id"] if target_message is not None else None,
+                message_seq=target_seq,
+                occurred_at=utc_now_iso(),
+                changed_fields=["last_read_message_seq"],
+            )
     return MarkReadResponse(
         success=True,
         conversation_id=conversation_id,
         unread_count=unread_count,
         last_read_message_seq=target_seq,
+        event_id=event_id,
     )
 
 

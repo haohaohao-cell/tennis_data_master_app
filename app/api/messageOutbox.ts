@@ -4,6 +4,7 @@ import type { MessageCreateInput } from "@/api/messages";
 
 const STORAGE_KEY = "tennis.message-outbox.v1";
 const MEDIA_ATTEMPT_STORAGE_KEY = "tennis.message-media-attempts.v1";
+const SYNC_STATE_STORAGE_KEY = "tennis.message-sync.v1";
 const MAX_ITEMS = 100;
 const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -72,6 +73,11 @@ type StoredOutbox = {
   items: LocalMessageOutboxItem[];
 };
 
+export type StoredMessageSyncState = {
+  cursor: string | null;
+  event_ids: string[];
+};
+
 let storageQueue: Promise<unknown> = Promise.resolve();
 
 function withStorageLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -119,8 +125,36 @@ async function writeStore(store: StoredOutbox) {
 }
 
 export async function getMessageDeviceId() {
+  return withStorageLock(async () => {
+    const store = await readStore();
+    await writeStore(store);
+    return store.device_id;
+  });
+}
+
+export async function readMessageSyncState(): Promise<StoredMessageSyncState> {
   await storageQueue;
-  return (await readStore()).device_id;
+  const raw = await AsyncStorage.getItem(SYNC_STATE_STORAGE_KEY);
+  if (!raw) return { cursor: null, event_ids: [] };
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredMessageSyncState>;
+    if ((parsed.cursor !== null && typeof parsed.cursor !== "string") || !Array.isArray(parsed.event_ids)) {
+      return { cursor: null, event_ids: [] };
+    }
+    return {
+      cursor: parsed.cursor ?? null,
+      event_ids: parsed.event_ids.filter((item): item is string => typeof item === "string").slice(-500),
+    };
+  } catch {
+    return { cursor: null, event_ids: [] };
+  }
+}
+
+export async function writeMessageSyncState(state: StoredMessageSyncState) {
+  await AsyncStorage.setItem(SYNC_STATE_STORAGE_KEY, JSON.stringify({
+    cursor: state.cursor,
+    event_ids: state.event_ids.slice(-500),
+  }));
 }
 
 export async function listLocalMessageOutbox() {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from backend.app.admin.dependencies import AdminActor, require_admin_actor
 from backend.app.admin.schemas import (
@@ -25,6 +25,8 @@ from backend.app.admin.schemas import (
     AdminVideoListResponse,
     AdminVideoRecord,
     AdminVideoUpdate,
+    AdminMessageMetrics,
+    AdminAiAssistResponse,
 )
 from backend.app.admin import service
 from backend.app.coach import service as coach_service
@@ -35,6 +37,8 @@ from backend.app.coach.schemas import (
     AdminCoachStatusPayload,
     CoachProfileRecord,
 )
+from backend.app.reports import service as reports_service
+from backend.app.reports.schemas import MessageReportListResponse, MessageReportResponse, MessageReportUpdate
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -71,6 +75,35 @@ def login_admin(payload: AdminLoginRequest, request: Request) -> AdminLoginRespo
     )
 
 
+@router.get("/message-reports", response_model=MessageReportListResponse)
+def list_message_reports(
+    _: AdminDependency,
+    page: Page = 1,
+    page_size: PageSize = 20,
+    status_filter: StatusFilter = None,
+) -> MessageReportListResponse:
+    return reports_service.list_message_reports(page, page_size, status_filter)
+
+
+@router.get("/message-metrics", response_model=AdminMessageMetrics)
+def get_message_metrics(
+    _: AdminDependency,
+    since: Annotated[str, Query(max_length=40)],
+    until: Annotated[str, Query(max_length=40)],
+) -> AdminMessageMetrics:
+    if since >= until:
+        raise HTTPException(status_code=400, detail={"code": "METRICS_TIME_RANGE_INVALID", "message": "since must be earlier than until."})
+    return service.message_metrics(since, until)
+
+
+@router.post("/ai-assist/status", response_model=AdminAiAssistResponse)
+def get_ai_assist_status(_: AdminDependency) -> AdminAiAssistResponse:
+    return service.ai_assist_unavailable()
+
+
+@router.patch("/message-reports/{report_id}", response_model=MessageReportResponse)
+def update_message_report(report_id: str, payload: MessageReportUpdate, actor: AdminDependency) -> MessageReportResponse:
+    return reports_service.update_message_report(report_id, actor.user.user_id, payload)
 @router.get("/users", response_model=AdminUserListResponse)
 def list_users(
     _: AdminDependency,
