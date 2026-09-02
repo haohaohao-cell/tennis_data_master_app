@@ -9,6 +9,9 @@
 
 本文件是网球数据系统的全局数据字典，用于约束后端、前端、App、数据库、CV、算法服务、逐帧数据文件和接口载荷中的字段命名、单位、枚举、含义和派生关系。后续开发如新增字段、指标、枚举或算法结果，应优先更新本文件，再同步代码和数据库迁移。
 
+项目所有持久化统一使用 PostgreSQL：后端业务数据使用 `public` schema，CV 数据使用
+`cv_analysis` schema。字段、约束、索引和迁移均以 PostgreSQL 实现为权威。
+
 ---
 
 ## 一、使用原则
@@ -847,11 +850,11 @@ Stage 11B 新增三张消息同步表。`messaging_devices` 以 `device_id` 为�
 索引读取。`device_sync_checkpoints` 以 `device_id` 为主键，按用户和设备保存
 HMAC 游标位置及更新时间，并通过设备/用户外键隔离 checkpoint。
 
-SQLite 与 PostgreSQL 均使用文本 ID、UTC ISO 文本时间和 JSON 文本，以保持现有
-服务契约；PostgreSQL 使用事务级 advisory lock，SQLite 使用本地单写者事务。
+PostgreSQL 使用文本 ID、UTC ISO 文本时间和 JSON 文本，以保持现有服务契约，
+并通过事务级 advisory lock 保护需要串行化的写入流程。
 三张表均为 additive、幂等初始化；停用同步读取即可保留历史消息和 Outbox，不做
 破坏性回滚。同步事件 payload 只允许 `changed_fields` 提示，不替代权限校验后的
-消息、通知或业务对象读取。SQLite 和本地 PostgreSQL 隔离 Schema 已验证；生产
+消息、通知或业务对象读取。本地 PostgreSQL 隔离 Schema 已验证；生产
 容量、保留清理和更高并发压测另行记录。
 
 `client_message_id` 用于移动端超时重试幂等；消息已经落库后，即使接收方离线，也可通过成员 `unread_count` 和消息列表恢复。
@@ -862,10 +865,9 @@ Stage 12 的 `edited_at` 仅在作者编辑仍为 `sent` 的文本消息时写�
 `message.edited`、`message.reaction_changed`、`message.forwarded` 和
 `conversation.members_changed`，payload 仅携带 `changed_fields` 提示。
 
-既有 SQLite 在调用 `initialize_database()` 时会检测并补充 Stage 12 的列、事实表和
-索引；旧版 `user_sync_events` 仅在缺少新事件枚举时，于同一事务中复制保留全部行后
-替换约束。默认 SQLite 不应作为迁移目标。PostgreSQL 使用隔离 Schema 执行渲染器，
-以 `ADD COLUMN IF NOT EXISTS` 和约束检测升级，不应在未经批准时针对 `public` 或生产库执行。
+PostgreSQL 使用隔离 Schema 执行 Stage 12 渲染器，以
+`ADD COLUMN IF NOT EXISTS` 和约束检测完成升级；旧版 `user_sync_events` 约束仅在
+缺少新事件枚举时替换。未经批准不得针对 `public` 或生产库执行升级。
 
 消息图片媒体 `chat_message_media` 使用独立存储根目录。`thumbnail_status` 为 `pending`、`generated` 或 `failed`；`thumbnail_failure_code` 记录派生缩略图失败原因。`storage_deleted_at` 表示原图和缩略图均完成删除，`last_cleanup_error` 保存最近一次清理错误。缩略图失败不代表原图校验失败，原图必须保留并继续按其上传状态治理。
 
@@ -1723,7 +1725,7 @@ P2 范围：
 
 消息计数口径：`chat_conversation_members.unread_count` 是会话级未读事实，
 `user_inbox_counters` 是派生导航缓存，可从 active 会话成员未读事实重建。
-SQLite 只读迁移输入、PostgreSQL 目标修复和校验结果必须分别记录；消息媒体文件
+历史数据只读迁移输入、PostgreSQL 目标修复和校验结果必须分别记录；消息媒体文件
 不属于数据库迁移内容，需独立治理。
 9. 如果是 P1/P2 算法字段，是否明确输入来源、计算口径、算法版本和可回溯证据。
 

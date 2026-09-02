@@ -388,7 +388,7 @@ Post 互动使用事实表表达：点赞写入 `post_reactions`，收藏写入 
 
 ## 22. 数据库运行时
 
-后端运行时统一使用 PostgreSQL 作为唯一业务数据库；SQLite 仅保留为一次性旧数据读取和迁移输入，不参与 API、任务或 CV 运行时。数据库迁移不改变 Post 或网球日记上传接口，也不新增视频、音频或文件消息。CV 历史表继续使用原字段，并置于独立的 `cv_analysis` schema。
+整个项目统一使用 PostgreSQL 作为唯一数据库，覆盖后端 API、后台任务、CV 持久化、受支持的数据库测试和本地开发；不存在文件数据库运行时回退。历史数据只允许通过根目录 `POSTGRES_MIGRATION_GUIDE.md` 规定的一次性只读流程导入。数据库迁移不改变 Post 或网球日记上传接口，也不新增视频、音频或文件消息。CV 表继续使用原字段，并置于独立的 `cv_analysis` schema。
 
 消息历史、搜索和 reconcile 保持 `message_seq` 游标语义；Post
 业务对象卡片在单页内批量 hydration，不复制完整业务对象。迁移审计和
@@ -419,8 +419,8 @@ Stage 14B 增加消息域举报和最小运营审核：用户可举报其有权�
 
 阶段十一 A 已完成 Push、实时事件和公开多设备同步的架构设计。阶段十一 B 已
 实现公开多设备 REST sync 基础能力：设备注册/撤销、recipient-scoped 事件、
-opaque cursor、per-device checkpoint、事件去重和过期游标 reconciliation；SQLite
-和本地 PostgreSQL 隔离 Schema 均已验证。产品仍保留前台轮询、REST 历史、
+opaque cursor、per-device checkpoint、事件去重和过期游标 reconciliation；本地
+PostgreSQL 隔离 Schema 已验证。产品仍保留前台轮询、REST 历史、
 通知列表和消息 reconcile 作为断线补偿。Stage 11D 已提供单实例、认证的
 WebSocket 唤醒传输，不携带消息正文且不替代 REST sync；Push、APNs/FCM、SSE
 和多实例实时传输不属于当前范围。

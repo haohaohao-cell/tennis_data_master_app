@@ -17,10 +17,10 @@ the public API URL from that file; existing `TENNIS_*` environment variables
 continue to override non-network settings (and `TENNIS_CORS_ORIGINS` overrides
 the file's CORS list).
 
-The backend requires PostgreSQL. Set `TENNIS_DATABASE_URL` (or the compatibility
-alias `TENNIS_POSTGRES_DSN`) before starting the API; there is no SQLite runtime
-fallback. Run `python scripts/init_postgres_db.py` once to create both the
-backend schema and the CV `cv_analysis` schema.
+The backend uses PostgreSQL exclusively. Set `TENNIS_DATABASE_URL` (or the
+compatibility alias `TENNIS_POSTGRES_DSN`) before starting the API; there is no
+embedded-file runtime fallback. Run `python scripts/init_postgres_db.py` once
+to create both the backend schema and the CV `cv_analysis` schema.
 
 Start the local API server:
 

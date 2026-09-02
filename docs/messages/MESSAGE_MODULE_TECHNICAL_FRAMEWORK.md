@@ -144,7 +144,7 @@ PostgreSQL 是开发、测试和部署的事实存储。所有时间字段使用
 
 消息响应同时提供通用 `business_object_card` 外壳，作为对象卡片的权威状态来源；它以 `kind`、`object_type`、`object_id`、展示 `state`、`access`、`object_state`、`can_preview`、`can_open`、`can_forward` 和安全摘要为基础。App 端使用同一状态映射显示 `active`、`archived`、`deleted`、`unavailable`、`denied`、`not_found` 与 `unsupported`。只有既有的 Activity 和 Post 详情路由会在 `can_open` 为真时接收对象 ID；没有详情路由的 Lesson、Video 和 Analysis 保持不可点击。Stage 13C-D 仅对源用户和每个目标会话活跃成员均有当前访问权限的 Activity、Lesson 和已上传 Video 开放引用转发，且不复制对象内容。删除、归档、失效和权限变化不会改写历史消息，后续读取会重新水合。聊天上传媒体仍是单消息绑定，不能跨会话转发。旧 `share_card` 仅为 `post_share` 兼容字段，由同一 hydration 结果派生。
 
-Post 分享幂等键作用域为 `(authenticated_user_id, client_message_id)`。会话分享必须携带非空键；同一键只有在 Post、分享目标类型、会话、channel、message_text、消息类型、对象引用和 payload 全部一致时才是安全重试，服务端返回第一次提交的 share/message 和原始对象引用。任一字段不同返回 HTTP 409 `CLIENT_MESSAGE_ID_CONFLICT`，不返回旧记录或卡片，也不产生消息、未读、隐藏会话恢复、通知或 `share_count` 副作用。数据库部分唯一索引负责并发最终保护，应用层负责完整身份比较。旧 SQLite 升级会添加 nullable 幂等字段；检测到既有重复键时启动明确失败，不删除数据。幂等重试仍按当前 Post 权限 hydration `business_object_card`；冲突响应不包含旧卡片。Post 分享本身不复用 Post 上传接口，也不接入实时或 Push。
+Post 分享幂等键作用域为 `(authenticated_user_id, client_message_id)`。会话分享必须携带非空键；同一键只有在 Post、分享目标类型、会话、channel、message_text、消息类型、对象引用和 payload 全部一致时才是安全重试，服务端返回第一次提交的 share/message 和原始对象引用。任一字段不同返回 HTTP 409 `CLIENT_MESSAGE_ID_CONFLICT`，不返回旧记录或卡片，也不产生消息、未读、隐藏会话恢复、通知或 `share_count` 副作用。数据库部分唯一索引负责并发最终保护，应用层负责完整身份比较。历史数据导入会补充 nullable 幂等字段；检测到既有重复键时明确失败，不删除数据。幂等重试仍按当前 Post 权限 hydration `business_object_card`；冲突响应不包含旧卡片。Post 分享本身不复用 Post 上传接口，也不接入实时或 Push。
 
 ### 4.5 消息请求
 
@@ -331,8 +331,8 @@ PATCH /notifications/preferences
 
 - `shared/api-schema/social-messages.md` 是跨端契约的权威文档。
 - 变更字段、枚举或计数语义时，同时更新 backend schemas、App API 类型、测试和本技术框架。
-- 数据库结构变更必须提供可执行 PostgreSQL 迁移脚本，并说明历史 SQLite 数据兼容策略。
-- SQLite 到 PostgreSQL 使用 `scripts/migrate_sqlite_to_postgres.py`，支持只读源、dry-run、分批重跑、冲突报告和导入后校验；原 SQLite 文件保留用于恢复和对比。
+- 数据库结构变更必须提供可执行 PostgreSQL 迁移脚本，并说明历史数据兼容策略。
+- 一次性历史数据导入统一按根目录 `POSTGRES_MIGRATION_GUIDE.md` 执行，必须支持只读源、dry-run、分批重跑、冲突报告和导入后校验；原始文件保留用于恢复和对比。
 - 消息序号、幂等键、未读计数、会话最后消息和消息媒体绑定继续在事务边界内更新；`chat_message_media` 与 Post/网球日记上传表保持隔离。
 - 新增用户可见页面、面板或弹层时同步更新 `docs/ui/UI_NAMING_REGISTRY.md`。
 - 保持消息表与 Post、Activity、Video、Lesson 等业务表解耦，通过受控引用和读取时权限校验连接业务。
@@ -371,7 +371,7 @@ wake-up 传输。SSE、真实 APNs/FCM、输入状态、在线状态、端到端
 当前访问状态不会被索引绕过。结果游标按 `message_seq DESC` 排序，并以 HMAC 绑定
 用户、会话和完整过滤条件；搜索不会写入同步事件或发送 WebSocket wake-up。
 
-SQLite 与 PostgreSQL 均使用 portable `LIKE` 和会话过滤索引作为正确性基线，未引入
+PostgreSQL 使用 portable `LIKE` 和会话过滤索引作为正确性基线，未引入
 全文检索、中文分词、搜索集群或跨实例索引。
 
 ## Stage 14B--14D 与 Stage 16B：治理和生产依赖边界
@@ -383,12 +383,12 @@ SQLite 与 PostgreSQL 均使用 portable `LIKE` 和会话过滤索引作为正�
 不执行账户硬删除或自动匿名化。Stage 16B 仅定义这些替换点和生产启动前配置拒绝规则，
 未接入对象存储 SDK、broker、APNs/FCM 或跨实例分发。
 
-## 14. 阶段十一 A（已完成设计）与阶段十一 B（已实现 SQLite 基础）
+## 14. 阶段十一 A（已完成设计）与阶段十一 B（已实现 PostgreSQL 基础）
 
 阶段十一 A 仅完成实时、Push 和公开多设备同步的架构提案。现有
 `outbox_events` 保持内部、可租约的消息工作队列；`user_sync_events` 承载
 recipient-scoped 的公开游标重放，不能用 worker `processed` 状态判断客户端是否
 可同步。Stage 11B 已实现设备注册/撤销、HMAC 游标、用户级 sync、checkpoint、
-事件去重和过期游标 REST reconciliation；SQLite 和本地 PostgreSQL 隔离 Schema
-均已验证。现阶段只发送最小事件 envelope，REST sync/history/reconcile 仍是
+事件去重和过期游标 REST reconciliation；本地 PostgreSQL 隔离 Schema 已验证。
+现阶段只发送最小事件 envelope，REST sync/history/reconcile 仍是
 最终一致性来源。Stage 11D 的 WebSocket 仅在提交后发送有界、按用户隔离的 wake-up envelope；Push provider、APNs/FCM、SSE 和多实例 fan-out 未实现。

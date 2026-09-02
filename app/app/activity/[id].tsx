@@ -347,6 +347,7 @@ function ActivityVideoPlayer({ source, video }: { source: VideoSource; video: Vi
     <View style={styles.playerShell}>
       {canPlay ? (
         <VideoView
+          key={video?.video_id ?? "activity-video"}
           contentFit="contain"
           fullscreenOptions={{ enable: true, orientation: "landscape" }}
           nativeControls

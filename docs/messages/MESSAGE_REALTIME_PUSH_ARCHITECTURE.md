@@ -1,7 +1,7 @@
 # Message Realtime and Push Architecture
 
-Status: Stage 11B--11D are implemented and verified in SQLite plus local
-PostgreSQL isolated schemas. Stage 11C provides a test-only Fake Push provider
+Status: Stage 11B--11D are implemented and verified in local PostgreSQL
+isolated schemas. Stage 11C provides a test-only Fake Push provider
 for `channel='push'`; Stage 11D provides an authenticated, single-instance
 WebSocket wake-up channel. APNs, FCM, SSE, real provider delivery and
 multi-instance fan-out are not implemented.
@@ -97,7 +97,7 @@ authenticated user and records optional platform/app-version metadata. A cursor
 is per device, while read watermarks remain shared conversation-member state.
 The server owns cursor encoding and validates recipient, device, retention epoch
 and signature. Clients deduplicate envelopes by `event_id` and merge messages
-with `message_id`/`message_seq`. SQLite emits `message.created`,
+with `message_id`/`message_seq`. PostgreSQL emits `message.created`,
 `message.recalled` and `conversation.read` inside their business transactions.
 
 Expired/missing cursors return `SYNC_CURSOR_EXPIRED` with a reconciliation plan:
@@ -119,9 +119,9 @@ message persistence; a lost Push is recovered through sync/history.
 | `push_deliveries` | Delivery attempt for event/device/token | unique `(event_id, device_id, purpose)`; retry and provider result |
 | `user_sync_events` | Recipient replay source | unique `(recipient_user_id, event_id)`; append-only cursor index |
 
-Tables are additive. SQLite keeps text UUID/JSON compatibility for lightweight
-tests; PostgreSQL adds recipient/cursor and worker indexes, row locking and
-retention jobs. Rollback disables consumers/new endpoints, leaving additive
+Tables are additive. PostgreSQL keeps text UUID/JSON compatibility for the API
+contract and adds recipient/cursor and worker indexes, row locking and retention
+jobs. Rollback disables consumers/new endpoints, leaving additive
 tables unused. APNs/FCM credentials arrive only in Stage 11C. Invalid tokens
 disable token rows, never message history. Push payloads contain route, event id
 and coarse category only.
@@ -156,9 +156,9 @@ version, occurred/persisted time, minimal JSON and privacy class. Enforce unique
 event_id)` for cursors. Its retention window must exceed the documented cursor
 window; expired cursors force reconciliation rather than reading deleted rows.
 
-All candidates are SQLite-compatible with text IDs, text timestamps and JSON
-text. PostgreSQL adds foreign keys, partial active-token indexes and `SKIP
-LOCKED` claims where workers need them. Migration is additive and idempotent;
+All candidates use PostgreSQL text IDs, text timestamps and JSON text for API
+compatibility. PostgreSQL also provides foreign keys, partial active-token
+indexes and `SKIP LOCKED` claims where workers need them. Migration is additive and idempotent;
 rollback stops readers/consumers and retains rows until an explicitly approved
 retention job, never by destructive migration.
 
@@ -218,8 +218,8 @@ flag/consumer-disable rollback. REST remains fallback.
 
 Stage 11B front end adds a durable sync cursor/checkpoint; backend adds
 authorized device and sync services; database adds devices, sync events and
-checkpoints; shared contract publishes finalized sync models. SQLite core
-behavior is implemented and verified. PostgreSQL isolated-schema verification is
+checkpoints; shared contract publishes finalized sync models. PostgreSQL core
+behavior is implemented and verified. Isolated-schema verification is
 local evidence only and does not prove production readiness. No real provider or
 multi-instance socket is included.
 
@@ -246,12 +246,12 @@ Stage 11R runs isolated PostgreSQL concurrency, privacy and performance gates,
 then separately approved real-device/provider validation if product readiness
 requires it. It does not add product features. Any stage rolls back by disabling
 its feature flag/consumer and retaining additive data for audit; it never rolls
-back business messages or silently switches to SQLite.
+back business messages or switches away from PostgreSQL.
 
 ## Test Plan
 
-SQLite: schema compatibility, envelope generation, cursor validation, duplicate
-handling and REST fallback. PostgreSQL: transactional fan-out, `SKIP LOCKED`,
+PostgreSQL: schema compatibility, envelope generation, cursor validation,
+duplicate handling, REST fallback, transactional fan-out, `SKIP LOCKED`,
 crash/lease reclaim, concurrent checkpoints, revocation, replay and
 p50/p95/p99/max. Fake provider: token rotation/invalidation, retryable/permanent
 failure, deduplication, mute/preference and payload privacy. Realtime:

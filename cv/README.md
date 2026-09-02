@@ -10,7 +10,7 @@ from cv.scripts.db_operations import TennisAnalysisRepository
 ```
 
 `run_inference_v2(...)` 仍返回 `(shots_payload, points_payload)`，JSON 与数据库字段保持不变。
-根目录的 `config.py` 统一定义数据、权重和默认数据库路径。
+`cv/config.py` 统一定义数据和权重路径；持久化统一连接 PostgreSQL 的 `cv_analysis` schema。
 
 生产球坐标使用 GridTrackNet H5。将权重放在
 `cv/models/weights/model_weights.h5`，或设置 `GRIDTRACKNET_MODEL_PATH`；

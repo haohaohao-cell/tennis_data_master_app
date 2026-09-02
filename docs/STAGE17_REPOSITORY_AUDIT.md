@@ -24,13 +24,13 @@ database migration, production connection, deployment, or file deletion was run.
 
 ### GENERATED_EVIDENCE
 
-Ignored `stage*.json`, migration render SQL, SQLite WAL/SHM files and temporary
-PostgreSQL schemas are reproducible evidence or runtime artifacts. They were not
-deleted. The default SQLite database remains ignored and unchanged.
+Ignored `stage*.json`, migration render SQL, legacy database journal files and
+temporary PostgreSQL schemas are reproducible evidence or runtime artifacts.
+They were not deleted. The default legacy database file remains ignored and unchanged.
 
 ### DEFERRED_NOT_SUBMIT / DO_NOT_SUBMIT
 
-- Default `backend/db/tennis_data_master.sqlite3` and its `-wal`/`-shm` files.
+- Default legacy database file and its journal files under `backend/db/`.
 - Any local secrets, passwords, complete DSNs, real tokens, production exports or
   files containing unreviewed user data.
 - No real object-storage, broker, APNs/FCM, hard-delete, anonymization or AI
@@ -46,7 +46,7 @@ deleted. The default SQLite database remains ignored and unchanged.
 
 `python -m compileall -q backend/app backend/tests`, `npm run lint`,
 `npx tsc --noEmit`, `git diff --check`, `backend/tests/message_sync_api.py`,
-`stage11c_sqlite.py`, `stage11d_realtime_api.py`, Stage 12 migration/API, Stage
+Stage 11C and 11D regressions, Stage 12 migration/API, Stage
 13 object/forward, Stage 14 search/moderation/export, Activity delete, and the
 Stage 16B adapter test were run on 2026-09-01. All exited zero. `expo lint`
 reported one non-blocking existing unused-variable warning in
@@ -70,8 +70,8 @@ Each group is a submit candidate unless a stricter classification below applies:
 | `docs/**`, `shared/api-schema/social-messages.md` | Product/API/audit documentation | Documentation contract | KEEP_AND_SUBMIT |
 | `scripts/audit_stage10_release.py` | Historical release audit helper | Audit-only | REVIEW_BEFORE_SUBMIT |
 | `backend/db/b-r2-activity-delete-report-20260830-135547.json` | Generated local evidence | Not build-referenced | REVIEW_BEFORE_SUBMIT |
-| Ignored `backend/db/stage*.json`, rendered SQL, SQLite WAL/SHM and temporary database/media files | Historical/generated evidence | Not build-referenced | DEFERRED_NOT_SUBMIT |
-| Default SQLite, local secrets/DSNs/tokens, production exports and real user-data artifacts | Local/runtime data | Never build-referenced | DO_NOT_SUBMIT |
+| Ignored `backend/db/stage*.json`, rendered SQL, legacy database journals and temporary database/media files | Historical/generated evidence | Not build-referenced | DEFERRED_NOT_SUBMIT |
+| Default legacy database file, local secrets/DSNs/tokens, production exports and real user-data artifacts | Local/runtime data | Never build-referenced | DO_NOT_SUBMIT |
 
 No dirty file remains unclassified. The only owner decision is whether to retain
 the generated B-R2 report and historical ignored evidence in a future release

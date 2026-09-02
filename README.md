@@ -57,13 +57,10 @@ The current repository has three unrelated pre-existing type errors in
 `app/app/(tabs)/profile.tsx`; they must be fixed before claiming a full-project
 typecheck pass. Message-module static tests remain runnable independently.
 
-PostgreSQL is the only application database for backend and CV persistence.
-SQLite is supported only as an explicit, read-only source for the one-time
-transfer utility. See `docs/database/POSTGRES_MIGRATION.md` for the
-non-destructive transfer and validation commands.
-
-若存在历史 CV SQLite 文件，先执行
-`python scripts/migrate_cv_sqlite_to_postgres.py --sqlite <路径> --dsn $env:TENNIS_DATABASE_URL --dry-run`，确认后去掉 `--dry-run` 执行导入。
+PostgreSQL is the only database used by this project. Backend APIs, background
+tasks, CV persistence, supported database tests, and local development must use
+PostgreSQL; there is no embedded-file database fallback. Historical data
+transfer instructions are centralized in `POSTGRES_MIGRATION_GUIDE.md`.
 
 Message video operations require `ffprobe.exe` and `ffmpeg.exe` on PATH (or
 `TENNIS_FFPROBE_PATH`/`TENNIS_FFMPEG_PATH`). See
@@ -74,7 +71,7 @@ media cleanup procedures.
 For migration consistency checks, always pass an explicit isolated schema such
 as `--schema message_<timestamp>`. `scripts/reconcile_inbox_counters.py` is
 read-only by default; its `--execute` mode updates only users present in the
-read-only SQLite source and records destination before/after values.
+approved legacy source and records destination before/after values.
 
 Optional local admin account for the admin Web:
 

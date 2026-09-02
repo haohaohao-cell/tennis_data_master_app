@@ -1072,12 +1072,6 @@ function HomeVideoPreview({
     pausePlayer();
   }, [active, pausePlayer, player]);
 
-  useEffect(() => {
-    return () => {
-      pausePlayer();
-    };
-  }, [pausePlayer]);
-
   return (
     <View style={styles.cardVideoFrame}>
       {posterUri && !ready ? (

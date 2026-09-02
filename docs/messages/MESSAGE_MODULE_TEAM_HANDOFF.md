@@ -4,7 +4,7 @@
 
 `chat_message_media` 是媒体生命周期和已验证文件元数据的唯一消息媒体表；`chat_message_attachments` 是消息到媒体或对象卡片的关系表。消息视频不使用 Post、Activity、`videos` 或 `app/api/uploads.ts`。`client_upload_id` 只负责上传幂等，`client_message_id` 只负责消息幂等。
 
-PostgreSQL 是消息模块及其他后端模块的唯一运行时数据库；SQLite 仅用于旧数据只读审计和迁移输入。迁移前必须通过只读完整性审计确认源库，并将派生 inbox cache drift 显式记录；不得静默修复或覆盖源文件。
+PostgreSQL 是整个项目的唯一数据库，覆盖消息模块、其他后端模块、CV 持久化、受支持的数据库测试和本地开发；不存在文件数据库运行时回退。历史数据导入必须按根目录 `POSTGRES_MIGRATION_GUIDE.md` 完成只读完整性审计，并将派生 inbox cache drift 显式记录；不得静默修复或覆盖源文件。
 
 常用检查：
 
@@ -35,7 +35,7 @@ python tests/message_image_static.py
 必须以当次 `npx tsc --noEmit` 的实际输出为准，不将历史错误或历史通过结论
 当作当前工作区证据。
 
-本地 SQLite 文件是已确认的可信迁移源，但每次迁移仍须以只读方式审计文件指纹、
+已确认的本地历史数据库文件可作为一次性迁移源，但每次迁移仍须以只读方式审计文件指纹、
 表结构、外键和计数。审计命令必须带上已批准的 SHA-256；任何派生 cache drift 都不得
 在源库中修复或覆盖。
 
@@ -45,9 +45,9 @@ python tests/message_image_static.py
 
 所有本地报告、数据库、WAL/SHM 和媒体文件不得提交；密码、完整 DSN、storage key 和绝对敏感路径不得进入代码、文档或日志。
 
-阶段十一 A 已完成架构设计，阶段十一 B 已实现并通过 SQLite 和本地 PostgreSQL 验证：公开多设备
+阶段十一 A 已完成架构设计，阶段十一 B 已实现并通过本地 PostgreSQL 隔离 Schema 验证：公开多设备
 sync 使用独立的 `user_sync_events`、设备注册/撤销和 per-device checkpoint，
-不复用内部 Outbox 的 processed 状态。两种数据库验证互不替代。Stage 11D 的
+不复用内部 Outbox 的 processed 状态。Stage 11D 的
 WebSocket 只推送提交后的最小 wake-up envelope，不持有消息数据且无多实例 fan-out。
 Fake Push 仅支持测试用 `channel='push'`；当前仍没有 APNs/FCM、SSE、真实 Push
 token 或真实设备服务。PostgreSQL 证据仅适用于本地隔离 schema，发布候选审计不代表

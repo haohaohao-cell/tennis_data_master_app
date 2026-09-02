@@ -883,6 +883,7 @@ function PostVideoStage({
     <Pressable onPress={togglePlayback} style={styles.stage}>
       {source ? (
         <VideoView
+          key={firstVideo?.video_id ?? "post-video"}
           contentFit="cover"
           nativeControls={false}
           onFirstFrameRender={onFirstFrameRender}

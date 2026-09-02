@@ -16,4 +16,5 @@
 连接池默认大小为 1-4，可通过 `TENNIS_CV_DATABASE_POOL_MIN_SIZE` 和
 `TENNIS_CV_DATABASE_POOL_MAX_SIZE` 调整；修改 DSN、schema 或池大小时会自动重建池。
 
-已有 `match_analysis.sqlite` 时，使用 `scripts/migrate_cv_sqlite_to_postgres.py` 只读迁移；该脚本不会删除或修改源文件，`--dry-run` 只统计源表行数。
+项目运行时统一使用 PostgreSQL，不创建或读写本地数据库文件。旧版 CV 数据的
+一次性只读导入流程见根目录 `POSTGRES_MIGRATION_GUIDE.md`。

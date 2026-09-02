@@ -12,13 +12,19 @@ Do not treat this as a toy demo or temporary prototype unless the user explicitl
 
 This repository is organized as a multi-surface tennis data system:
 
-* `backend/`: Backend API, database, users, task management, and SQLite schema/data.
+* `backend/`: Backend API, PostgreSQL schemas, users, and task management.
 * `cv/`: Computer vision pipeline for video analysis, tracking, events, analytics, persistence, and sample data.
 * `web/`: Web dashboard and admin console.
 * `app/`: React Native / Expo mobile app.
 * `shared/`: Shared API schemas, data schemas, constants, and cross-platform contracts.
 * `docs/`: Project documentation, especially tennis data and database design.
 * `scripts/`: Startup, deployment, migration, and data-processing scripts.
+
+PostgreSQL is the project's only database for application runtime, CV
+persistence, local development, and supported database tests. Do not add an
+embedded-file database fallback. The only documented exception is the
+one-time, read-only historical import procedure in
+`POSTGRES_MIGRATION_GUIDE.md`.
 
 ## Work Process
 

@@ -552,9 +552,9 @@ without returning the old records or creating any message, share, unread,
 notification, hidden-conversation restoration, or `share_count` side effect.
 The database partial unique index is the final concurrent-write guard; the
 application comparison preserves request identity before returning a retry.
-Older SQLite databases are upgraded by adding nullable columns and the index.
-If duplicate non-null keys already exist, startup fails with an explicit
-reconciliation error and does not delete data.
+Historical data imports add the nullable columns and index before activation.
+If duplicate non-null keys already exist, reconciliation fails explicitly and
+does not delete data.
 
 For compatibility, `share_card` remains available only for `post_share` and is
 derived from the same `business_object_card` hydration result. New clients must
@@ -571,12 +571,12 @@ Post sharing does not implement or reuse Post or tennis-diary upload APIs.
 
 ## PostgreSQL runtime compatibility
 
-The API contract is unchanged when the backend uses PostgreSQL. String IDs,
+The backend uses PostgreSQL exclusively. String IDs,
 timestamp response formats, message sequence numbers, idempotency conflict
 codes, unread counts, object-card availability states, and message-media
-authorization remain compatible with the historical SQLite baseline. PostgreSQL
-is the only runtime write authority; SQLite is retained only as a read-only
-legacy migration input.
+authorization remain compatible with the existing API contract. PostgreSQL is
+the only runtime and write authority. One-time historical import is governed by
+the repository migration guide and is never an application runtime path.
 
 ## Query boundary
 
@@ -625,21 +625,21 @@ while storage keys remain server-only. Video messages use a `video` attachment
 and return authorized original/thumbnail URLs. Upload and message idempotency
 remain separate through `client_upload_id` and `client_message_id`.
 
-## Stage 11B Public Device Sync (Implemented / SQLite and Local PostgreSQL Verified)
+## Stage 11B Public Device Sync (Implemented / Local PostgreSQL Verified)
 
 The current `/messages/conversations/{conversation_id}/events` endpoint remains
 an internal message-created event view. Stage 11B adds recipient-scoped device
 registration, revocation, sync and checkpoint endpoints. Cursors are HMAC-signed
 and bound to the authenticated user, device and retention epoch. The durable
 `user_sync_events` log is separate from the internal `outbox_events` worker
-queue. SQLite emits `message.created`, `message.recalled`, `message.edited`,
+queue. PostgreSQL emits `message.created`, `message.recalled`, `message.edited`,
 `message.reaction_changed`, `message.forwarded`, `conversation.read` and
 `conversation.members_changed`
 atomically with their business transactions. Payloads contain only minimal
 `changed_fields` hints and never a Push token, storage key, server path, message
 body or copied business object. Expired cursors return `SYNC_CURSOR_EXPIRED`
-with a REST reconciliation plan. SQLite and local PostgreSQL isolated-schema
-tests are verified. Push, APNs/FCM, WebSocket and SSE are not implemented.
+with a REST reconciliation plan. Local PostgreSQL isolated-schema tests are
+verified. Push, APNs/FCM, WebSocket and SSE are not implemented.
 ### Stage 11C Fake Push
 
 Push token registration is test-only and provider-independent. It accepts only
@@ -716,13 +716,11 @@ media paths, or storage keys.
 
 ## Existing database upgrade
 
-SQLite runtime initialization detects the Stage 12 additions and performs an
-idempotent, transactional upgrade. When an old `user_sync_events` CHECK
-constraint lacks Stage 12 event types, every legacy row is copied before the
-replacement table becomes authoritative. PostgreSQL rendering uses additive
-column/table/index creation and replaces only the legacy event-type CHECK
-constraint. Operators must run PostgreSQL upgrades in an explicitly named,
-isolated schema before any production rollout.
+PostgreSQL schema rendering detects the Stage 12 additions and performs an
+idempotent, transactional upgrade. It uses additive column/table/index creation
+and replaces only a legacy `user_sync_events` event-type CHECK constraint.
+Operators must run upgrades in an explicitly named, isolated PostgreSQL schema
+before any production rollout.
 
 ## Stage 14A authorized message search
 

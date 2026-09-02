@@ -279,9 +279,9 @@ same-field comparison is still enforced. The database unique index protects
 concurrent requests, while the application compares the complete request
 identity before returning a retry.
 
-Post-share idempotency is preserved by the PostgreSQL migration schema and
-the SQLite-to-PostgreSQL transfer tool; no Post upload endpoint is changed by
-the database migration.
+Post-share idempotency is preserved by the PostgreSQL migration schema and the
+historical data transfer procedure; no Post upload endpoint is changed by the
+database migration.
 
 ## Update, Delete, Mine, Detail
 
