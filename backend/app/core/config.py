@@ -1,11 +1,85 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+NETWORK_CONFIG_PATH = ROOT_DIR / "config" / "network.json"
+
+
+def _load_network_config() -> dict:
+    if not NETWORK_CONFIG_PATH.is_file():
+        raise RuntimeError(
+            "Network configuration file not found: "
+            f"{NETWORK_CONFIG_PATH}\n\n"
+            "Copy config/network.example.json to config/network.json "
+            "and configure the network settings for this machine."
+        )
+    try:
+        with NETWORK_CONFIG_PATH.open("r", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"Invalid network configuration JSON: {NETWORK_CONFIG_PATH}: {error}") from error
+    if not isinstance(config, dict):
+        raise RuntimeError(f"Network configuration must be a JSON object: {NETWORK_CONFIG_PATH}")
+    return config
+
+
+NETWORK_CONFIG = _load_network_config()
+
+
+def _network_section(name: str) -> dict:
+    value = NETWORK_CONFIG.get(name)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"network.json is missing required section: {name}")
+    return value
+
+
+BACKEND_NETWORK_CONFIG = _network_section("backend")
+PUBLIC_NETWORK_CONFIG = _network_section("public")
+
+
+def _network_value(section: dict, name: str) -> object:
+    if name not in section:
+        raise RuntimeError(f"network.json is missing required field: {name}")
+    return section[name]
+
+
+def _network_int(name: str) -> int:
+    value = _network_value(BACKEND_NETWORK_CONFIG, name)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(f"network.json backend.{name} must be an integer") from error
+    if name == "port" and not 1 <= parsed <= 65535:
+        raise RuntimeError("network.json backend.port must be an integer between 1 and 65535")
+    return parsed
+
+
+def _network_str(name: str) -> str:
+    value = _network_value(BACKEND_NETWORK_CONFIG, name)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"network.json backend.{name} must be a non-empty string")
+    return value.strip()
+
+
+def _public_api_base_url() -> str:
+    value = _network_value(PUBLIC_NETWORK_CONFIG, "apiBaseUrl")
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError("network.json public.apiBaseUrl must be a non-empty URL")
+    return value.strip().rstrip("/")
+
+
+def _network_cors_origins() -> list[str] | None:
+    value = BACKEND_NETWORK_CONFIG.get("corsOrigins")
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(origin, str) for origin in value):
+        raise RuntimeError("network.json backend.corsOrigins must be an array of strings")
+    return [origin.strip() for origin in value if origin.strip()]
 
 
 def _parse_cors_origins(raw_value: str | None) -> list[str]:
@@ -19,6 +93,9 @@ class Settings:
     app_name: str = "Tennis Data Master API"
     api_prefix: str = "/api/v1"
     environment: str = os.getenv("TENNIS_API_ENV", "development")
+    backend_host: str = _network_str("host")
+    backend_port: int = _network_int("port")
+    public_api_base_url: str = _public_api_base_url()
     database_path: Path = Path(
         os.getenv(
             "TENNIS_DB_PATH",
@@ -91,10 +168,16 @@ class Settings:
     area_city_boundary_coordinate_system: str = os.getenv("TENNIS_AREA_CITY_COORDINATE_SYSTEM", "gcj02")
 
     def __post_init__(self) -> None:
+        configured_cors = os.getenv("TENNIS_CORS_ORIGINS")
+        if configured_cors is not None:
+            cors_origins = _parse_cors_origins(configured_cors)
+        else:
+            network_origins = _network_cors_origins()
+            cors_origins = network_origins if network_origins is not None else ["*"]
         object.__setattr__(
             self,
             "cors_origins",
-            _parse_cors_origins(os.getenv("TENNIS_CORS_ORIGINS")),
+            cors_origins,
         )
 
     @property

@@ -11,6 +11,15 @@
 
 ## 运行
 
+首次使用时，在项目根目录执行：
+
+```powershell
+Copy-Item config/network.example.json config/network.json
+```
+
+Admin 启动服务器会自动读取该文件中的 `admin.host`、`admin.port` 和
+`public.apiBaseUrl`，并将公共 API 地址注入页面；不需要额外生成配置。
+
 ```bash
 npm run dev
 ```
@@ -25,7 +34,8 @@ npm run build
 
 ## 连接 backend
 
-页面右上角可以配置 API Base URL 和管理员 Bearer token。默认 API Base URL 是：
+页面右上角可以配置 API Base URL 和管理员 Bearer token。默认值由
+`config/network.json` 的 `public.apiBaseUrl` 自动派生（模板对应）：
 
 ```text
 http://localhost:8000/api/v1

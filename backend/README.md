@@ -10,6 +10,13 @@ Use the project Conda environment before running backend commands:
 conda activate tennis
 ```
 
+The Backend, Admin, and Expo app share the root-level `config/network.json`.
+Create it once from `config/network.example.json` before importing the Backend.
+The Backend reads `backend.host`, `backend.port`, `backend.corsOrigins`, and
+the public API URL from that file; existing `TENNIS_*` environment variables
+continue to override non-network settings (and `TENNIS_CORS_ORIGINS` overrides
+the file's CORS list).
+
 The backend requires PostgreSQL. Set `TENNIS_DATABASE_URL` (or the compatibility
 alias `TENNIS_POSTGRES_DSN`) before starting the API; there is no SQLite runtime
 fallback. Run `python scripts/init_postgres_db.py` once to create both the

@@ -6,6 +6,16 @@ Production-oriented tennis data platform with backend APIs, admin Web, Expo mobi
 
 The examples below use PowerShell 7 on Windows. Run commands from the repository root unless a step says otherwise.
 
+Before starting Backend, Admin, or the Expo app on a new machine, copy the
+project-level network template:
+
+```powershell
+Copy-Item config/network.example.json config/network.json
+```
+
+Edit `config/network.json` only when this machine needs a different LAN/API
+address or listening port. The file is intentionally ignored by Git.
+
 ### 1. Prepare Backend Environment
 
 This project uses the Conda environment named `tennis` for Python commands:
@@ -116,10 +126,13 @@ npm install
 npm run start
 ```
 
-The app automatically resolves the backend host from Expo when possible. Override it when needed:
+The app reads the public backend address from the shared network config. For a
+physical device or a different machine, edit `config/network.json`:
 
 ```powershell
-$env:EXPO_PUBLIC_API_BASE_URL = "http://<your-computer-ip>:8000"
+$networkConfig = Get-Content config/network.json | ConvertFrom-Json
+$networkConfig.public.apiBaseUrl = "http://<your-computer-ip>:8000"
+$networkConfig | ConvertTo-Json -Depth 5 | Set-Content config/network.json
 npm run start
 ```
 

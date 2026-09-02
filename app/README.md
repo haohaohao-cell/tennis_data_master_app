@@ -4,6 +4,15 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
 ## Get started
 
+From the project root, create the shared network configuration once:
+
+```powershell
+Copy-Item config/network.example.json config/network.json
+```
+
+Expo reads the public API URL from this file during `npx expo start`; no
+separate config-generation command is required.
+
 1. Install dependencies
 
    ```bash

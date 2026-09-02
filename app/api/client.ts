@@ -1,5 +1,4 @@
 import Constants from "expo-constants";
-import { Platform } from "react-native";
 
 import { captureError } from "@/diagnostics/errorReporter";
 
@@ -48,37 +47,21 @@ export class ApiError extends Error {
   }
 }
 
-function getExpoHostUri(): string | null {
-  const expoConstants = Constants as unknown as {
-    expoConfig?: { hostUri?: string };
-    manifest?: { debuggerHost?: string; hostUri?: string };
-  };
-
-  return (
-    expoConstants.expoConfig?.hostUri ??
-    expoConstants.manifest?.hostUri ??
-    expoConstants.manifest?.debuggerHost ??
-    null
-  );
-}
-
 function resolveApiBaseUrl(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
-  if (fromEnv) {
-    return fromEnv.replace(/\/$/, "");
+  const expoConfig = Constants.expoConfig as
+    | { extra?: { network?: { public?: { apiBaseUrl?: string } } } }
+    | null
+    | undefined;
+  const configuredUrl = expoConfig?.extra?.network?.public?.apiBaseUrl?.trim().replace(/\/+$/, "");
+  const apiBaseUrl = configuredUrl?.endsWith("/api/v1")
+    ? configuredUrl.slice(0, -"/api/v1".length)
+    : configuredUrl;
+  if (!apiBaseUrl) {
+    throw new Error(
+      "Network configuration is unavailable. Copy config/network.example.json to config/network.json and restart Expo.",
+    );
   }
-
-  const hostUri = getExpoHostUri();
-  const host = hostUri?.split(":")[0];
-  if (host && host !== "localhost" && host !== "127.0.0.1") {
-    return `http://${host}:8000`;
-  }
-
-  if (Platform.OS === "android") {
-    return "http://10.0.2.2:8000";
-  }
-
-  return "http://localhost:8000";
+  return apiBaseUrl;
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();

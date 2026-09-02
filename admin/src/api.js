@@ -1,5 +1,16 @@
+function configuredApiBaseUrl() {
+  const apiBaseUrl = globalThis.__TENNIS_NETWORK_CONFIG__?.public?.apiBaseUrl;
+  if (!apiBaseUrl) {
+    throw new Error(
+      "Network configuration is unavailable. Copy config/network.example.json to config/network.json and restart Admin.",
+    );
+  }
+  const normalized = String(apiBaseUrl).replace(/\/+$/, "");
+  return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+}
+
 export const DEFAULT_ADMIN_SETTINGS = {
-  apiBaseUrl: "http://localhost:8000/api/v1",
+  apiBaseUrl: configuredApiBaseUrl(),
   adminToken: "",
   mockFallback: false,
 };
