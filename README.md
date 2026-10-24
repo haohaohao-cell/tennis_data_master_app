@@ -156,3 +156,9 @@ Message history, search, reconcile, and Post card hydration are bounded per
 page. Keep migration and PostgreSQL validation or performance reports in local,
 ignored paths; they are environment-specific evidence rather than repository
 artifacts.
+
+## 关于本仓库
+
+> 本人以协作者（collaborator）身份参与此项目。本仓库为其**展示镜像**，项目代码版权归原作者 / 组织所有，本人仅参与部分开发。
+>
+> 项目的正式仓库见：[annanliannan/tennis_data_master_app](https://github.com/annanliannan/tennis_data_master_app)
